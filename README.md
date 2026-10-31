@@ -25,7 +25,7 @@ A Cargo workspace plus a pnpm workspace driven by Vite+ (`vp`), like pass-extens
 ```
 crates/server/   the service: AirTouch protocol + connection, control logic, SQLite, HTTP API
 packages/api/    API types for TypeScript, generated from crates/server by ts-rs
-apps/            the UI (to come)
+apps/web/        the UI (Svelte 5, Tailwind v4), built into the image and served at /
 ```
 
 | File in `crates/server/src` |                                                                           |
@@ -47,6 +47,9 @@ pnpm install
 vp run ready                                   # format/lint, clippy, tsc, tests, build
 cargo test                                     # just the Rust tests
 vp run @aircon/api#generate                    # regenerate TS types after changing API structs
+
+# UI dev server, proxying /api to a local `cargo run` (or set AIRCON_API to another controller)
+cd apps/web && vp dev
 
 AIRCON_AIRTOUCH_HOST=<console ip> cargo run   # http://localhost:8080
 curl -s localhost:8080/api/state | jq .controller

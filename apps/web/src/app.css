@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/geist/wght.css';
+
+/*
+ * Tokens from the Climate design canvas. Light is the base; dark applies when the OS
+ * prefers it, unless the user picked a theme (stored, set on <html data-theme>).
+ */
+:root {
+  --bg: #f2f4f5;
+  --s1: #ffffff;
+  --s2: #eceff1;
+  --line: #dce1e4;
+  --tx: #0f1418;
+  --mu: #56626a;
+  --on: #ffffff;
+  --cool: #1b68b5;
+  --cool-bg: #e2edf8;
+  --warm: #975304;
+  --warm-bg: #faedda;
+  --err: #b5332a;
+  --err-bg: #fbe5e2;
+  --knob: #ffffff;
+  --track: #c3cbd0;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0d1012;
+  --s1: #161b1e;
+  --s2: #1f2529;
+  --line: #2a3237;
+  --tx: #e9edef;
+  --mu: #97a3ab;
+  --on: #0d1012;
+  --cool: #66b1f2;
+  --cool-bg: rgb(102 177 242 / 0.15);
+  --warm: #f2a848;
+  --warm-bg: rgb(242 168 72 / 0.15);
+  --err: #f27063;
+  --err-bg: rgb(242 112 99 / 0.15);
+  --knob: #e9edef;
+  --track: #3a4349;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0d1012;
+    --s1: #161b1e;
+    --s2: #1f2529;
+    --line: #2a3237;
+    --tx: #e9edef;
+    --mu: #97a3ab;
+    --on: #0d1012;
+    --cool: #66b1f2;
+    --cool-bg: rgb(102 177 242 / 0.15);
+    --warm: #f2a848;
+    --warm-bg: rgb(242 168 72 / 0.15);
+    --err: #f27063;
+    --err-bg: rgb(242 112 99 / 0.15);
+    --knob: #e9edef;
+    --track: #3a4349;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-s1: var(--s1);
+  --color-s2: var(--s2);
+  --color-line: var(--line);
+  --color-tx: var(--tx);
+  --color-mu: var(--mu);
+  --color-on: var(--on);
+  --color-cool: var(--cool);
+  --color-cool-bg: var(--cool-bg);
+  --color-warm: var(--warm);
+  --color-warm-bg: var(--warm-bg);
+  --color-err: var(--err);
+  --color-err-bg: var(--err-bg);
+  --color-knob: var(--knob);
+  --color-track: var(--track);
+  --font-sans: 'Geist Variable', system-ui, sans-serif;
+}
+
+@layer base {
+  html,
+  body {
+    background: var(--bg);
+    color: var(--tx);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--cool);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+}

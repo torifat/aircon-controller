@@ -2,8 +2,8 @@
 .github
 .venv
 target
-node_modules
 data
-apps
-packages
+**/node_modules
+**/dist
 **/tests
+**/*.test.ts
