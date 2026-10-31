@@ -1,0 +1,21 @@
+# JS
+node_modules
+dist
+*.local
+
+# Rust
+/target
+
+# Local runs
+/data
+
+# Editor directories and files
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.sw?
+
+# AI agent worktrees
+.claude/worktrees/

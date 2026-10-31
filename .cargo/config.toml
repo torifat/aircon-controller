@@ -1,0 +1,3 @@
+[env]
+# ts-rs writes the API's TypeScript types here (see packages/api).
+TS_RS_EXPORT_DIR = { value = "packages/api/src/generated", relative = true }

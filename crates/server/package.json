@@ -1,0 +1,11 @@
+{
+  "name": "@aircon/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Makes the Rust crate visible to `vp run -r`; cargo owns the build.",
+  "scripts": {
+    "build": "cargo build -p aircon-server",
+    "test": "cargo test -p aircon-server",
+    "check": "cargo fmt -p aircon-server --check && cargo clippy -p aircon-server --all-targets -- -D warnings"
+  }
+}

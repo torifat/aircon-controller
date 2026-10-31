@@ -1,0 +1,11 @@
+[tools]
+node = "24"
+pnpm = "12.11.2"
+
+[env]
+# vp and the other workspace CLIs come from the root devDependencies.
+_.path = ["{{config_root}}/node_modules/.bin"]
+
+[settings]
+# Rust comes from rust-toolchain.toml (mise runs rustup), so the version lives in one file.
+idiomatic_version_file_enable_tools = ["rust"]
