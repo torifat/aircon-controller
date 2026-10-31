@@ -351,6 +351,21 @@ impl Device for AirTouch {
             power: on,
             setpoint,
         };
-        self.send(Request::ZoneControl(vec![control])).await
+        self.send(Request::ZoneControl(vec![control])).await?;
+        // The console takes a second or so to push the zone's new status. Assume the change
+        // took until then, so a check right after already sees it (and the push corrects us
+        // if it didn't), and ask for that status now rather than waiting.
+        {
+            let mut s = self.lock();
+            if let Some(z) = s.zones.get_mut(&zone) {
+                if let Some(on) = on {
+                    z.power = if on { ZonePower::On } else { ZonePower::Off };
+                }
+                if setpoint.is_some() {
+                    z.setpoint = setpoint;
+                }
+            }
+        }
+        self.send(Request::ZoneStatus).await
     }
 }

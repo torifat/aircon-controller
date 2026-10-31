@@ -36,6 +36,9 @@ pub struct State {
     last_status: Option<Status>,
     zone_intents: HashMap<u8, f64>,
     last_prune: f64,
+    /// The last dry-run decision logged. Nothing changes on the AC in dry run, so the same
+    /// decision comes up every tick; it's only logged again once it differs.
+    last_would: Option<String>,
 }
 
 #[derive(Debug)]
@@ -55,6 +58,7 @@ impl<D: Device> Controller<D> {
             last_status: None,
             zone_intents: HashMap::new(),
             last_prune: 0.0,
+            last_would: None,
         };
         Arc::new(Self {
             device,
@@ -128,13 +132,12 @@ impl<D: Device> Controller<D> {
         if let Some(cmd) = decision.command {
             let title = describe(&cmd, &snap);
             if decision.dry_run {
-                self.store.log(
-                    now,
-                    ActivityKind::Decision,
-                    &format!("Would: {title}"),
-                    &decision.reason,
-                    true,
-                );
+                let would = format!("Would: {title}");
+                if st.last_would.as_deref() != Some(would.as_str()) {
+                    self.store
+                        .log(now, ActivityKind::Decision, &would, &decision.reason, true);
+                    st.last_would = Some(would);
+                }
             } else if let Err(e) = self.device.send_ac(cmd).await {
                 tracing::warn!("sending {cmd:?} failed: {e:#}");
                 self.store.log(
@@ -154,6 +157,9 @@ impl<D: Device> Controller<D> {
             }
         }
 
+        if decision.command.is_none() || !decision.dry_run {
+            st.last_would = None;
+        }
         self.note_status(&mut st, &decision, now);
         if let Err(e) = self.store.record(now, &snap, &decision) {
             tracing::error!("recording readings failed: {e:#}");
@@ -228,7 +234,7 @@ impl<D: Device> Controller<D> {
         target: Option<f64>,
     ) -> Result<(), ActionError> {
         let mut st = self.state.lock().await;
-        let zone = self.zone(&mut st, number)?;
+        let zone = self.zone(&st, number)?;
         let now = (self.clock)();
         st.zone_intents.insert(number, now);
 
@@ -357,18 +363,17 @@ impl<D: Device> Controller<D> {
         after
     }
 
-    fn zone(&self, st: &mut State, number: u8) -> Result<ZoneReading, ActionError> {
-        if st.snapshot.is_none() {
-            st.snapshot = Some(
-                self.device
-                    .snapshot()
-                    .ok_or_else(|| ActionError::Offline("Not connected to AirTouch".into()))?,
-            );
-        }
-        st.snapshot
-            .as_ref()
-            .and_then(|s| s.zones.iter().find(|z| z.number == number))
-            .cloned()
+    /// The zone as the console has it now, not as of the last check: changes in quick
+    /// succession must each start from the one before.
+    fn zone(&self, st: &State, number: u8) -> Result<ZoneReading, ActionError> {
+        let snap = self
+            .device
+            .snapshot()
+            .or_else(|| st.snapshot.clone())
+            .ok_or_else(|| ActionError::Offline("Not connected to AirTouch".into()))?;
+        snap.zones
+            .into_iter()
+            .find(|z| z.number == number)
             .ok_or(ActionError::NoZone(number))
     }
 }

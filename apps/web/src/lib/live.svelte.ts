@@ -54,14 +54,20 @@ class Live {
    * Run an action, then re-check right away so the UI shows its effect. A second refresh a
    * moment later picks up the AirTouch's own status push for zone changes.
    */
-  async act(action: () => Promise<unknown>) {
+  async act(action: () => Promise<unknown>): Promise<boolean> {
     try {
       await action();
-      this.state = await api.tick();
-      setTimeout(() => void this.refresh(), 1500);
     } catch (e) {
       this.flash(e instanceof Error ? e.message : String(e));
+      return false;
     }
+    try {
+      this.state = await api.tick();
+    } catch {
+      // The action went through; the next poll catches up.
+    }
+    setTimeout(() => void this.refresh(), 1500);
+    return true;
   }
 
   async patchSettings(patch: SettingsPatch) {

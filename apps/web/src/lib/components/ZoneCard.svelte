@@ -11,20 +11,38 @@
   let { zone, limits, heating }: { zone: ZoneState; limits: Limits | null; heating: boolean } =
     $props();
 
-  // Target clicks collect locally and go out once the user stops tapping.
+  // Target taps collect locally and go out once the user stops tapping. The new value
+  // stays on screen until the AirTouch reports it (or gives up after a while), so a
+  // state refresh that lands before the console catches up doesn't flick it back.
+  const CONFIRM_MS = 10_000;
   let pending = $state<number | null>(null);
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let sendTimer: ReturnType<typeof setTimeout> | undefined;
+  let confirmTimer: ReturnType<typeof setTimeout> | undefined;
   const target = $derived(pending ?? zone.target ?? zone.setpoint ?? 24);
   const [min, max] = $derived(limits ? (heating ? limits.heat : limits.cool) : [16, 30]);
 
   function setTarget(v: number) {
     pending = v;
-    clearTimeout(timer);
-    timer = setTimeout(async () => {
-      await live.act(() => api.patchZone(zone.number, { target: v }));
-      pending = null;
+    clearTimeout(sendTimer);
+    clearTimeout(confirmTimer);
+    sendTimer = setTimeout(async () => {
+      const sent = await live.act(() => api.patchZone(zone.number, { target: v }));
+      if (!sent) {
+        if (pending === v) pending = null;
+        return;
+      }
+      confirmTimer = setTimeout(() => {
+        if (pending === v) pending = null;
+      }, CONFIRM_MS);
     }, 700);
   }
+
+  $effect(() => {
+    if (pending != null && zone.target != null && Math.abs(zone.target - pending) < 0.05) {
+      pending = null;
+      clearTimeout(confirmTimer);
+    }
+  });
 
   const gap = $derived(zone.temperature != null ? zone.temperature - target : null);
   const chip = $derived(gap != null ? gapChip(gap) : null);

@@ -515,3 +515,45 @@ async fn settings_survive_restart() {
     assert_eq!(env.controller.state().await.settings.deadband, 1.5);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[tokio::test]
+async fn quick_target_changes_each_start_from_the_last() {
+    let env = Env::new();
+    env.tick().await;
+    // Two taps before the next check: the second must start from the first, not from
+    // what the last check saw.
+    for target in [23.5, 23.0] {
+        let body = json!({ "target": target });
+        let (status, _) = env.call(Method::PATCH, "/api/zones/0", Some(body)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    let titles = env.titles(&["info"]).await;
+    assert_eq!(
+        titles[..2],
+        [
+            "Master Bed target 23.5° → 23.0°",
+            "Master Bed target 24.0° → 23.5°"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn dry_run_logs_a_repeated_decision_once() {
+    let env = Env::new();
+    for _ in 0..3 {
+        env.tick().await;
+        env.advance(60.0);
+    }
+    let would: Vec<_> = env
+        .titles(&["decision"])
+        .await
+        .into_iter()
+        .filter(|t| t.starts_with("Would:"))
+        .collect();
+    assert_eq!(would.len(), 1, "{would:?}");
+
+    // A different decision is logged again.
+    env.fake.zones.lock().unwrap()[2].temperature = Some(25.5);
+    env.tick().await;
+    assert_eq!(env.titles(&["decision"]).await.len(), 2);
+}
