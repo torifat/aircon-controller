@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite-plus';
 
 // `vp dev` proxies the API to a controller: a local `cargo run` by default, or e.g.
-// AIRCON_API=https://aircon.rifat.homes to develop against the live one.
+// AIRCON_API=https://<your controller> to develop against a deployed one.
 const api = process.env.AIRCON_API ?? 'http://localhost:8080';
 
 export default defineConfig({
