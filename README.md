@@ -13,6 +13,10 @@ drives the AC itself from the zone sensors:
 - **Hands off**: an AC switched off by someone else is never turned back on; a fan, setpoint
   or mode change made in the AirTouch app pauses the controller for 30 min. Zone changes
   don't pause: they're how you steer it.
+- **One room on**: the AirTouch would close its damper near target and spill the rest, so
+  the controller switches that room to percentage control at 100% and holds its target with
+  the AC alone. It goes back to temperature control when another room comes on, it's turned
+  off, or the controller is off, paused or in dry run.
 - Rooms in **percentage control** have no usable AirTouch setpoint, so their target is kept
   here (set from the UI).
 

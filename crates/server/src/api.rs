@@ -141,6 +141,8 @@ pub struct ZoneState {
     pub active: bool,
     /// The zone furthest from target, which sets fan and setpoint.
     pub driving: bool,
+    /// The only room on, opened fully by the controller so nothing spills.
+    pub held_open: bool,
 }
 
 #[derive(Serialize, TS)]
@@ -209,6 +211,7 @@ async fn build_state<D: Device>(c: &Controller<D>) -> StateResponse {
                         error: eval.and_then(|e| e.error),
                         active: eval.is_some_and(|e| e.active),
                         driving: worst == Some(z.number),
+                        held_open: st.runtime.opened == Some(z.number),
                     }
                 })
                 .collect()

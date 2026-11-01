@@ -38,7 +38,15 @@ pub enum Request {
 pub struct ZoneControl {
     pub zone: u8,
     pub power: Option<bool>,
-    pub setpoint: Option<f64>,
+    pub value: Option<ZoneValue>,
+}
+
+/// What a zone command sets. A setpoint puts the zone in temperature control, an open
+/// percentage in percentage control.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ZoneValue {
+    Setpoint(f64),
+    Open(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -245,8 +253,9 @@ pub fn encode(message_id: u8, request: &Request) -> Vec<u8> {
                     Some(false) => 0b010,
                     Some(true) => 0b011,
                 };
-                let (value_kind, value) = match z.setpoint {
-                    Some(c) => (0b101, setpoint_byte(c)),
+                let (value_kind, value) = match z.value {
+                    Some(ZoneValue::Setpoint(c)) => (0b101, setpoint_byte(c)),
+                    Some(ZoneValue::Open(p)) => (0b100, p.min(100)),
                     None => (0b000, 0xFF),
                 };
                 d.extend([z.zone & 0x3F, (value_kind << 5) | power, value, 0]);
@@ -553,7 +562,7 @@ mod tests {
         let off = ZoneControl {
             zone: 1,
             power: Some(false),
-            setpoint: None,
+            value: None,
         };
         assert_eq!(
             encode(10, &Request::ZoneControl(vec![off])),
@@ -562,11 +571,21 @@ mod tests {
         let on = ZoneControl {
             zone: 0,
             power: Some(true),
-            setpoint: Some(23.5),
+            value: Some(ZoneValue::Setpoint(23.5)),
         };
         assert_eq!(
             encode(10, &Request::ZoneControl(vec![on])),
             hex("555555aa80b00ac0000c200000000004000100a38700bd10")
+        );
+        let open = ZoneControl {
+            zone: 2,
+            power: None,
+            value: Some(ZoneValue::Open(100)),
+        };
+        let packet = encode(10, &Request::ZoneControl(vec![open]));
+        assert_eq!(
+            &packet[packet.len() - 6..packet.len() - 2],
+            [0x02, 0x80, 100, 0]
         );
     }
 

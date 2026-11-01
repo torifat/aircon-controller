@@ -261,6 +261,9 @@ pub struct Runtime {
     pub last_power_change: Option<f64>,
     pub last_seen_power: Option<bool>,
     pub expected: Option<Expected>,
+    /// The lone room we switched to percentage control and opened fully. Its target is in
+    /// `Settings::targets` until it's handed back.
+    pub opened: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

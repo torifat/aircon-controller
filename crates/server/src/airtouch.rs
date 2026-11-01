@@ -19,7 +19,7 @@ use crate::models::{
 use crate::now;
 use crate::protocol::{
     self, AcAbility, AcControl, AcMode, AcStatus, Decoder, FanSpeed, Message, Request, ZonePower,
-    ZoneStatus,
+    ZoneStatus, ZoneValue,
 };
 
 const PORT: u16 = 9005;
@@ -52,7 +52,7 @@ pub trait Device: Send + Sync + 'static {
         &self,
         zone: u8,
         on: Option<bool>,
-        setpoint: Option<f64>,
+        value: Option<ZoneValue>,
     ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
@@ -344,12 +344,12 @@ impl Device for AirTouch {
         &self,
         zone: u8,
         on: Option<bool>,
-        setpoint: Option<f64>,
+        value: Option<ZoneValue>,
     ) -> anyhow::Result<()> {
         let control = protocol::ZoneControl {
             zone,
             power: on,
-            setpoint,
+            value,
         };
         self.send(Request::ZoneControl(vec![control])).await?;
         // The console takes a second or so to push the zone's new status. Assume the change
@@ -361,8 +361,16 @@ impl Device for AirTouch {
                 if let Some(on) = on {
                     z.power = if on { ZonePower::On } else { ZonePower::Off };
                 }
-                if setpoint.is_some() {
-                    z.setpoint = setpoint;
+                match value {
+                    Some(ZoneValue::Setpoint(c)) => {
+                        z.percentage_control = false;
+                        z.setpoint = Some(c);
+                    }
+                    Some(ZoneValue::Open(p)) => {
+                        z.percentage_control = true;
+                        z.open = p.min(100);
+                    }
+                    None => {}
                 }
             }
         }

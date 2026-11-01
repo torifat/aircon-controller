@@ -10,6 +10,7 @@ use aircon_server::models::{
     AcReading, Command, Direction, FAN_LEVELS, Fan, SetpointLimits, Snapshot, ZoneControl,
     ZoneReading,
 };
+use aircon_server::protocol::ZoneValue;
 use aircon_server::store::Store;
 use axum::Router;
 use axum::body::Body;
@@ -22,7 +23,7 @@ use tower::ServiceExt;
 #[derive(Debug, Clone, PartialEq)]
 enum Sent {
     Ac(Command),
-    Zone(u8, Option<bool>, Option<f64>),
+    Zone(u8, Option<bool>, Option<ZoneValue>),
 }
 
 struct Fake {
@@ -120,12 +121,12 @@ impl Device for Fake {
         &self,
         number: u8,
         on: Option<bool>,
-        setpoint: Option<f64>,
+        value: Option<ZoneValue>,
     ) -> anyhow::Result<()> {
         self.sent
             .lock()
             .unwrap()
-            .push(Sent::Zone(number, on, setpoint));
+            .push(Sent::Zone(number, on, value));
         for z in self
             .zones
             .lock()
@@ -134,7 +135,17 @@ impl Device for Fake {
             .filter(|z| z.number == number)
         {
             z.on = on.unwrap_or(z.on);
-            z.setpoint = setpoint.or(z.setpoint);
+            match value {
+                Some(ZoneValue::Setpoint(c)) => {
+                    z.control = ZoneControl::Temperature;
+                    z.setpoint = Some(c);
+                }
+                Some(ZoneValue::Open(p)) => {
+                    z.control = ZoneControl::Percentage;
+                    z.damper = f64::from(p) / 100.0;
+                }
+                None => {}
+            }
         }
         Ok(())
     }
@@ -330,7 +341,10 @@ async fn temperature_zone_target_goes_to_airtouch() {
         Some(json!({ "on": true, "target": 23.5 })),
     )
     .await;
-    assert_eq!(env.fake.sent(), vec![Sent::Zone(0, Some(true), Some(23.5))]);
+    assert_eq!(
+        env.fake.sent(),
+        vec![Sent::Zone(0, Some(true), Some(ZoneValue::Setpoint(23.5)))]
+    );
     assert!(
         env.titles(&[])
             .await
@@ -556,4 +570,71 @@ async fn dry_run_logs_a_repeated_decision_once() {
     env.fake.zones.lock().unwrap()[2].temperature = Some(25.5);
     env.tick().await;
     assert_eq!(env.titles(&["decision"]).await.len(), 2);
+}
+
+#[tokio::test]
+async fn lone_room_is_held_open_until_another_comes_on() {
+    let env = Env::new();
+    {
+        let mut zones = env.fake.zones.lock().unwrap();
+        zones[0].on = true;
+        zones[1].on = false;
+        zones[2].on = false;
+    }
+    // Dry run only says so, once.
+    env.tick().await;
+    env.advance(60.0);
+    env.tick().await;
+    assert!(!env.fake.sent().iter().any(|s| matches!(s, Sent::Zone(..))));
+    let would = env.titles(&["decision"]).await;
+    assert_eq!(
+        would
+            .iter()
+            .filter(|t| *t == "Would: Master Bed fully open")
+            .count(),
+        1
+    );
+
+    env.go_live().await;
+    env.tick().await;
+    assert!(
+        env.fake
+            .sent()
+            .contains(&Sent::Zone(0, None, Some(ZoneValue::Open(100))))
+    );
+    let state = env.tick().await;
+    let bed = zone_json(&state, "Master Bed");
+    assert_eq!(bed["held_open"], true);
+    assert_eq!(bed["control"], "percentage");
+    assert_eq!(bed["target"], 24.0);
+    assert!(env.titles(&["external"]).await.is_empty(), "our own change");
+
+    // Its target is kept here while it's open, and goes back with it.
+    env.call(
+        Method::PATCH,
+        "/api/zones/0",
+        Some(json!({ "target": 23.0 })),
+    )
+    .await;
+    env.advance(60.0);
+    assert_eq!(zone_json(&env.tick().await, "Master Bed")["target"], 23.0);
+
+    env.call(Method::PATCH, "/api/zones/3", Some(json!({ "on": true })))
+        .await;
+    env.advance(60.0);
+    env.tick().await;
+    assert!(
+        env.fake
+            .sent()
+            .contains(&Sent::Zone(0, None, Some(ZoneValue::Setpoint(23.0))))
+    );
+    let state = env.tick().await;
+    let bed = zone_json(&state, "Master Bed");
+    assert_eq!(bed["held_open"], false);
+    assert_eq!(bed["control"], "temperature");
+    assert_eq!(env.get("/api/settings").await["targets"], json!({}));
+    assert_eq!(
+        env.titles(&["decision"]).await[0],
+        "Master Bed back to temperature control at 23.0°"
+    );
 }

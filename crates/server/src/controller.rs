@@ -7,10 +7,11 @@ use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
 
 use crate::airtouch::Device;
-use crate::logic::decide;
+use crate::logic::{Damper, damper, decide};
 use crate::models::{
     ActivityKind, Command, Decision, Runtime, Settings, Snapshot, Status, ZoneControl, ZoneReading,
 };
+use crate::protocol::ZoneValue;
 use crate::store::Store;
 
 const RETENTION_DAYS: f64 = 30.0;
@@ -39,6 +40,8 @@ pub struct State {
     /// The last dry-run decision logged. Nothing changes on the AC in dry run, so the same
     /// decision comes up every tick; it's only logged again once it differs.
     last_would: Option<String>,
+    /// The same for a room the controller would open in dry run.
+    last_would_open: Option<u8>,
 }
 
 #[derive(Debug)]
@@ -59,6 +62,7 @@ impl<D: Device> Controller<D> {
             zone_intents: HashMap::new(),
             last_prune: 0.0,
             last_would: None,
+            last_would_open: None,
         };
         Arc::new(Self {
             device,
@@ -160,6 +164,7 @@ impl<D: Device> Controller<D> {
         if decision.command.is_none() || !decision.dry_run {
             st.last_would = None;
         }
+        self.move_damper(&mut st, &mut runtime, &snap, now).await;
         self.note_status(&mut st, &decision, now);
         if let Err(e) = self.store.record(now, &snap, &decision) {
             tracing::error!("recording readings failed: {e:#}");
@@ -176,6 +181,89 @@ impl<D: Device> Controller<D> {
             st.last_prune = now;
         }
         decision
+    }
+
+    /// Carry out the lone-room rule. In dry run, opening a room is only logged, once.
+    async fn move_damper(&self, st: &mut State, runtime: &mut Runtime, snap: &Snapshot, now: f64) {
+        let change = damper(snap, &st.settings, runtime, now);
+        let would = if st.settings.enabled && st.settings.dry_run {
+            let s = Settings {
+                dry_run: false,
+                ..st.settings.clone()
+            };
+            match damper(snap, &s, runtime, now) {
+                Some(Damper::Open { zone, name, target }) => Some((zone, name, target)),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        match would {
+            Some((zone, name, target)) if st.last_would_open != Some(zone) => {
+                self.store.log(
+                    now,
+                    ActivityKind::Decision,
+                    &format!("Would: {name} fully open"),
+                    &open_reason(target),
+                    true,
+                );
+                st.last_would_open = Some(zone);
+            }
+            Some(_) => {}
+            None => st.last_would_open = None,
+        }
+
+        let Some(change) = change else { return };
+        let (zone, value, title, reason) = match &change {
+            Damper::Release => {
+                runtime.opened = None;
+                return;
+            }
+            Damper::Open { zone, name, target } => (
+                *zone,
+                ZoneValue::Open(100),
+                format!("{name} fully open"),
+                open_reason(*target),
+            ),
+            Damper::Restore {
+                zone,
+                name,
+                target,
+                reason,
+            } => (
+                *zone,
+                ZoneValue::Setpoint(*target),
+                format!("{name} back to temperature control at {target:.1}°"),
+                reason.clone(),
+            ),
+        };
+        st.zone_intents.insert(zone, now);
+        if let Err(e) = self.device.send_zone(zone, None, Some(value)).await {
+            tracing::warn!("sending {change:?} failed: {e:#}");
+            self.store.log(
+                now,
+                ActivityKind::Error,
+                &format!("Couldn't send: {title}"),
+                &format!("{e:#}"),
+                false,
+            );
+            return;
+        }
+        match change {
+            Damper::Open { zone, target, .. } => {
+                st.settings.targets.insert(zone, target);
+                runtime.opened = Some(zone);
+            }
+            _ => {
+                st.settings.targets.remove(&zone);
+                runtime.opened = None;
+            }
+        }
+        self.store.save_settings(&st.settings);
+        self.store
+            .log(now, ActivityKind::Decision, &title, &reason, false);
+        // Check again with the zone as it is now.
+        self.poke();
     }
 
     fn note_status(&self, st: &mut State, decision: &Decision, now: f64) {
@@ -259,7 +347,7 @@ impl<D: Device> Controller<D> {
         }
         if on.is_some() || setpoint.is_some() {
             self.device
-                .send_zone(number, on, setpoint)
+                .send_zone(number, on, setpoint.map(ZoneValue::Setpoint))
                 .await
                 .map_err(|e| ActionError::Offline(format!("{e:#}")))?;
         }
@@ -376,6 +464,10 @@ impl<D: Device> Controller<D> {
             .find(|z| z.number == number)
             .ok_or(ActionError::NoZone(number))
     }
+}
+
+fn open_reason(target: f64) -> String {
+    format!("Only room on; the AC holds it at {target:.1}° instead of spilling")
 }
 
 fn deg(v: Option<f64>) -> String {
