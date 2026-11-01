@@ -99,10 +99,18 @@ type ApiResult<T> = Result<Json<T>, ApiError>;
 #[ts(export)]
 pub struct StateResponse {
     pub now: f64,
+    pub build: BuildInfo,
     pub airtouch: DeviceInfo,
     pub ac: Option<AcState>,
     pub zones: Vec<ZoneState>,
     pub controller: ControllerState,
+}
+
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub struct BuildInfo {
+    pub version: String,
+    pub commit: Option<String>,
 }
 
 #[derive(Serialize, TS)]
@@ -180,6 +188,10 @@ async fn build_state<D: Device>(c: &Controller<D>) -> StateResponse {
     let snap = st.snapshot.as_ref();
     StateResponse {
         now: (c.clock)(),
+        build: BuildInfo {
+            version: crate::version().to_owned(),
+            commit: crate::commit().map(str::to_owned),
+        },
         airtouch: c.device.info(),
         ac: snap.map(|s| {
             let ac = &s.ac;

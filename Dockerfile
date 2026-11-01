@@ -17,6 +17,9 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo .cargo
 COPY crates crates
+# Release and commit for the UI's About section; CI passes them in.
+ARG AIRCON_VERSION
+ARG AIRCON_COMMIT
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/src/target \
   cargo build --release --locked -p aircon-server \

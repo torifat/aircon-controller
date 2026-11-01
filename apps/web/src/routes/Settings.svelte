@@ -167,5 +167,17 @@
         >{testing ? 'Checking…' : 'Test connection'}</button
       >
     </div>
+
+    {#if current}
+      <h2 class="m-0 px-1 pt-4 text-[13px] font-semibold text-mu">About</h2>
+      <div class={[card, 'p-4']}>
+        <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+          <dt class="text-mu">Version</dt><dd class="m-0">{current.build.version}</dd>
+          {#if current.build.commit}
+            <dt class="text-mu">Commit</dt><dd class="m-0 font-mono">{current.build.commit}</dd>
+          {/if}
+        </dl>
+      </div>
+    {/if}
   </div>
 {/if}

@@ -67,5 +67,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # "0.3.0" for a v0.3.0 tag, "edge" for main.
+          build-args: |
+            AIRCON_VERSION=${{ steps.meta.outputs.version }}
+            AIRCON_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

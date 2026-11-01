@@ -638,3 +638,10 @@ async fn lone_room_is_held_open_until_another_comes_on() {
         "Master Bed back to temperature control at 23.0°"
     );
 }
+
+#[tokio::test]
+async fn state_reports_the_build() {
+    let env = Env::new();
+    let state = env.get("/api/state").await;
+    assert_eq!(state["build"]["version"], "dev");
+}

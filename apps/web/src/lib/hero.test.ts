@@ -29,6 +29,7 @@ function state(
 ): StateResponse {
   return {
     now: 0,
+    build: { version: 'dev', commit: null },
     airtouch: {
       host: 'x',
       connected: true,
