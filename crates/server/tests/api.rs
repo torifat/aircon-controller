@@ -646,3 +646,44 @@ async fn controller_runs_the_dampers() {
     env.tick().await;
     assert_eq!(env.fake.sent().len(), before);
 }
+
+#[tokio::test]
+async fn dampers_rest_while_the_ac_is_off() {
+    let env = Env::new();
+    {
+        let mut zones = env.fake.zones.lock().unwrap();
+        zones[1].temperature = Some(23.9);
+        zones[2].temperature = Some(24.0);
+    }
+    env.go_live().await;
+    let zone_sends = || {
+        env.fake
+            .sent()
+            .into_iter()
+            .filter(|s| matches!(s, Sent::Zone(..)))
+            .count()
+    };
+    // Every room at target parks the AC, and the dampers stay where they are.
+    env.tick().await;
+    assert_eq!(
+        env.fake.sent_ac()[0],
+        Sent::Ac(Command {
+            power: Some(false),
+            fan: None,
+            setpoint: None
+        })
+    );
+    assert_eq!(zone_sends(), 0);
+    // Rooms swapping which is warmest while parked doesn't move them either.
+    env.fake.zones.lock().unwrap()[1].temperature = Some(24.1);
+    env.advance(60.0);
+    env.tick().await;
+    assert_eq!(zone_sends(), 0);
+
+    // Study drifts past the deadband: the check that turns the AC on sets the dampers.
+    env.fake.zones.lock().unwrap()[2].temperature = Some(26.5);
+    env.advance(360.0);
+    env.tick().await;
+    assert!(env.fake.ac.lock().unwrap().on);
+    assert!(zone_sends() > 0);
+}

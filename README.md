@@ -23,7 +23,8 @@ and the AC from the zone sensors; everyone uses the Climate UI rather than the A
 - **Percentage control, always**: with any room in temperature control the AirTouch resets the
   AC setpoint to the room targets (and spills what it throttles), so the controller switches
   rooms to percentage control, taking over their AirTouch setpoint as the target. Targets are
-  kept here and set from the UI. Off or paused, the controller leaves dampers where they are.
+  kept here and set from the UI. Off or paused, or with the AC off, the controller leaves dampers
+  where they are; the check that turns the AC back on sets them.
 
 Starts in **dry run**: decisions are logged ("Would: …") but nothing is sent.
 

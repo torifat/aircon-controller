@@ -184,13 +184,20 @@ impl<D: Device> Controller<D> {
     }
 
     /// Move the dampers to follow each room's gap. Nothing moves while the controller is
-    /// off or paused; in dry run the moves are only logged, once.
+    /// off or paused, or while the AC is: with no air, the neediest room flips between rooms
+    /// at target for nothing. The check that turns the AC back on sets them. In dry run the
+    /// moves are only logged, once.
     async fn move_dampers(&self, st: &mut State, decision: &Decision, now: f64) {
         let paused = st.runtime.paused_until.is_some_and(|t| now < t);
         let Some(snap) = st.snapshot.clone() else {
             return;
         };
-        let moves = if st.settings.enabled && !paused {
+        let blowing = decision
+            .command
+            .as_ref()
+            .and_then(|c| c.power)
+            .unwrap_or(snap.ac.on);
+        let moves = if st.settings.enabled && !paused && blowing {
             damper_moves(&snap, &decision.zones, &st.settings)
         } else {
             Vec::new()
