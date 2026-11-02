@@ -181,7 +181,7 @@ pub struct Settings {
     pub ease_within: f64,
     pub setpoint_step: f64,
     /// Damper opening, in percent, for a room at or past target. The room furthest from
-    /// target is always fully open.
+    /// target opens at least enough that the rooms on add up to 100%.
     pub damper_min: f64,
     /// A room this far from target is fully open; between this and target it closes
     /// gradually to `damper_min`.

@@ -19,7 +19,7 @@
 
 use crate::models::{
     AcReading, ActivityKind, Command, Decision, Direction, Event, Expected, FAN_LEVELS, Fan,
-    Runtime, Settings, Snapshot, Status, ZoneControl, ZoneEval,
+    Runtime, Settings, Snapshot, Status, ZoneControl, ZoneEval, ZoneReading,
 };
 
 const SETPOINT_TOLERANCE: f64 = 0.05;
@@ -419,56 +419,82 @@ pub fn opening_for(error: f64, s: &Settings) -> u8 {
     ((min + (100.0 - min) * share) / 5.0).round() as u8 * 5
 }
 
+/// Openings across the rooms that are on must add up to this, or the AirTouch spills.
+const NO_SPILL_TOTAL: f64 = 100.0;
+
 /// The damper moves to make this check.
 ///
 /// With a temperature-control room on, the AirTouch keeps resetting the AC setpoint to the
 /// room targets, so every room is switched to percentage control (its setpoint becomes the
-/// target kept here) and its damper follows its gap: the room needing it most fully open,
-/// others closing down to `damper_min` as they reach target. The neediest room staying at
-/// 100% keeps the total open enough that nothing spills. Rooms that are off, have no
-/// sensor or don't count keep their opening, once in percentage control.
+/// target kept here) and its damper follows its gap, closing down to `damper_min` as it
+/// reaches target. The room needing it most opens as far as its own gap asks, and at least
+/// far enough that the rooms on add up to `NO_SPILL_TOTAL`, so nothing spills: with Mouni
+/// at 20%, Study near target sits at 80% instead of taking a full blast. Rooms that are off,
+/// have no sensor or don't count keep their opening, once in percentage control.
 pub fn damper_moves(snap: &Snapshot, zones: &[ZoneEval], s: &Settings) -> Vec<DamperMove> {
     let neediest = zones
         .iter()
         .filter(|z| z.active)
         .max_by(|a, b| a.error.unwrap_or(0.0).total_cmp(&b.error.unwrap_or(0.0)))
         .map(|z| z.number);
-    snap.zones
-        .iter()
-        .filter_map(|z| {
-            let eval = zones.iter().find(|e| e.number == z.number);
-            let wanted = match eval {
-                Some(e) if e.active && Some(e.number) == neediest => Some(100),
-                Some(e) if e.active => e.error.map(|err| opening_for(err, s)),
-                _ => None,
-            };
-            let switch = z.control == ZoneControl::Temperature;
-            let now = z.damper * 100.0;
-            let to = match wanted {
-                Some(to) => to,
-                // Not ours to aim yet: switch it fully open, which never causes spill.
-                None if switch => 100,
-                None => return None,
-            };
-            let at_end = to == 100 || f64::from(to) <= s.damper_min;
-            let moved = (f64::from(to) - now).abs();
-            let needed = switch || moved >= DAMPER_SETTLE || (at_end && moved >= 2.5);
-            needed.then(|| DamperMove {
-                zone: z.number,
-                name: z.name.clone(),
-                from: z.damper,
-                to,
-                switch,
-                setpoint: z.setpoint,
-            })
+    let aim = |z: &ZoneReading, wanted: Option<u8>, opening: bool| {
+        let switch = z.control == ZoneControl::Temperature;
+        let now = z.damper * 100.0;
+        let to = match wanted {
+            Some(to) => to,
+            // Not ours to aim yet: switch it fully open, which never causes spill.
+            None if switch => 100,
+            None => return None,
+        };
+        let at_end = to == 100 || f64::from(to) <= s.damper_min;
+        let moved = (f64::from(to) - now).abs();
+        // The neediest room opening up is never held back: short of it, the total spills.
+        let needed = switch
+            || moved >= DAMPER_SETTLE
+            || (at_end && moved >= 2.5)
+            || (opening && f64::from(to) > now);
+        Some(DamperMove {
+            zone: z.number,
+            name: z.name.clone(),
+            from: z.damper,
+            to,
+            switch,
+            setpoint: z.setpoint,
         })
-        .collect()
+        .filter(|_| needed)
+    };
+    // Every other room first: the neediest makes up what they leave.
+    let mut others = 0.0;
+    let mut moves: Vec<DamperMove> = Vec::new();
+    for z in snap.zones.iter().filter(|z| Some(z.number) != neediest) {
+        let eval = zones.iter().find(|e| e.number == z.number);
+        let wanted = eval
+            .filter(|e| e.active)
+            .and_then(|e| e.error.map(|err| opening_for(err, s)));
+        let mv = aim(z, wanted, false);
+        if z.on {
+            others += mv.as_ref().map_or(z.damper * 100.0, |m| f64::from(m.to));
+        }
+        moves.extend(mv);
+    }
+    if let Some(z) = snap.zones.iter().find(|z| Some(z.number) == neediest) {
+        let err = zones
+            .iter()
+            .find(|e| e.number == z.number)
+            .and_then(|e| e.error);
+        let own = opening_for(err.unwrap_or(0.0), s);
+        let fill = ((NO_SPILL_TOTAL - others).clamp(0.0, 100.0) / 5.0).ceil() as u8 * 5;
+        moves.extend(aim(z, Some(own.max(fill)), true));
+    }
+    let order = |n: u8| snap.zones.iter().position(|z| z.number == n);
+    moves.sort_by_key(|m| order(m.zone));
+    moves
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{SetpointLimits, ZoneReading};
+    use crate::models::SetpointLimits;
 
     const NOW: f64 = 1_000_000.0;
 
@@ -974,8 +1000,9 @@ mod tests {
     }
 
     #[test]
-    fn neediest_room_is_fully_open_and_others_close_down() {
+    fn neediest_room_makes_up_the_rest_and_others_close_down() {
         // This afternoon: Study 0.8° over, Mouni 0.5° under at 100% and getting colder.
+        // Study's gap asks for 80%; Mouni closing to 10% leaves it 90% to fill.
         let s = snap(
             cool(),
             vec![
@@ -984,7 +1011,30 @@ mod tests {
                 off(pct(zone(1, 25.3), 0.05)),
             ],
         );
-        assert_eq!(moves(&s), vec![(3, 100, false), (2, 10, false)]);
+        assert_eq!(moves(&s), vec![(3, 90, false), (2, 10, false)]);
+        // Far off, it's fully open whatever the others leave.
+        let s = snap(
+            cool(),
+            vec![pct(zone(3, 25.5), 0.9), pct(zone(2, 24.6), 0.6)],
+        );
+        assert_eq!(moves(&s), vec![(3, 100, false)]);
+    }
+
+    #[test]
+    fn neediest_room_near_target_shares_the_air() {
+        // 18:31 on Nov 2: Study 0.3° over at 100%, Mouni held at 20%. Study's gap asks for
+        // 35%, but 80% is what keeps the total at 100 so nothing spills.
+        let s = snap(
+            cool(),
+            vec![pct(zone(3, 24.3), 1.0), pct(zone(2, 24.1), 0.2)],
+        );
+        assert_eq!(moves(&s), vec![(3, 80, false)]);
+        // Opening up to cover the total is never held back as a wobble.
+        let s = snap(
+            cool(),
+            vec![pct(zone(3, 24.3), 0.75), pct(zone(2, 24.1), 0.2)],
+        );
+        assert_eq!(moves(&s), vec![(3, 80, false)]);
     }
 
     #[test]
@@ -1009,8 +1059,9 @@ mod tests {
             cool(),
             vec![zone(3, 24.8), off(zone(1, 24.0)), pct(zone(2, 24.0), 0.1)],
         );
-        // On: aimed like any room. Off: switched fully open, which never spills.
-        assert_eq!(moves(&s), vec![(3, 100, true), (1, 100, true)]);
+        // On: aimed like any room, filling what zone 2's 10% leaves. Off: switched fully
+        // open, which never spills.
+        assert_eq!(moves(&s), vec![(3, 90, true), (1, 100, true)]);
     }
 
     #[test]

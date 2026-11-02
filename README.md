@@ -15,9 +15,11 @@ and the AC from the zone sensors; everyone uses the Climate UI rather than the A
 - **Hands off**: an AC switched off by someone else is never turned back on; a fan, setpoint
   or mode change made in the AirTouch app pauses the controller for 30 min, and its dampers
   too. Turning rooms on and off doesn't pause: that's how you steer it.
-- **Dampers**: the room furthest from target is fully open, so nothing spills; the others
-  close gradually as they near target, from 100% at 1° off down to 10% at target. Moves under
-  10 points wait, so small wobbles don't move them every minute.
+- **Dampers**: each room closes gradually as it nears target, from 100% at 1° off down to 10%
+  at target. The room furthest from target opens as far as its own gap asks, and at least
+  enough that the rooms on add up to 100%, so nothing spills: with Mouni at 20%, Study near
+  target runs at 80%. Moves under 10 points wait, so small wobbles don't move them every
+  minute.
 - **Percentage control, always**: with any room in temperature control the AirTouch resets the
   AC setpoint to the room targets (and spills what it throttles), so the controller switches
   rooms to percentage control, taking over their AirTouch setpoint as the target. Targets are

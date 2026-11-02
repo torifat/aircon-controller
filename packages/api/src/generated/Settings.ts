@@ -33,7 +33,7 @@ setpoint_gain: number, max_setpoint_offset: number,
 ease_within: number, setpoint_step: number, 
 /**
  * Damper opening, in percent, for a room at or past target. The room furthest from
- * target is always fully open.
+ * target opens at least enough that the rooms on add up to 100%.
  */
 damper_min: number, 
 /**

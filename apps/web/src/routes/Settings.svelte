@@ -119,7 +119,8 @@
           format={(v) => `${v}%`} onchange={(v) => save({ damper_min: v })} />
       </div>
       <p class="m-0 border-t border-line px-4 py-3 text-[13px] leading-snug text-mu">
-        The room furthest from target is always fully open, so nothing spills.
+        The room furthest from target opens at least enough that the rooms on add up to 100%, so nothing
+        spills.
       </p>
     </div>
 
