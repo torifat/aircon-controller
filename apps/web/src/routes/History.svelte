@@ -10,7 +10,9 @@
   const H = 300;
 
   let hours = $state<24 | 168>(24);
-  let zoneNo = $state<number | null>(null);
+  // Room tiles on Home link here with `?zone=N`.
+  const linked = new URLSearchParams(location.hash.split('?')[1] ?? '').get('zone');
+  let zoneNo = $state<number | null>(linked != null ? Number(linked) : null);
   let data = $state<HistoryResponse | null>(null);
   let decisions = $state<ActivityItem[]>([]);
   let selected = $state<number | null>(null);

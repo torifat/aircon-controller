@@ -7,7 +7,6 @@
     label,
     format,
     disabled = false,
-    compact = false,
     onchange,
   }: {
     value: number;
@@ -18,8 +17,6 @@
     label: string;
     format: (v: number) => string;
     disabled?: boolean;
-    /** Narrower buttons, for room cards in the desktop grid. */
-    compact?: boolean;
     onchange: (next: number) => void;
   } = $props();
 
@@ -33,14 +30,14 @@
     aria-label={`Lower ${label}`}
     disabled={disabled || value <= min}
     onclick={() => set(value - step)}
-    class={['h-11 text-[22px] leading-none disabled:opacity-40', compact ? 'w-10' : 'w-11']}>−</button
+    class="h-11 w-11 text-[22px] leading-none disabled:opacity-40">−</button
   >
-  <span class={['text-center font-semibold', compact ? 'min-w-12 text-base' : 'min-w-[54px] text-[17px]']} aria-live="polite">{format(value)}</span>
+  <span class="min-w-[54px] text-center text-[17px] font-semibold" aria-live="polite">{format(value)}</span>
   <button
     type="button"
     aria-label={`Raise ${label}`}
     disabled={disabled || value >= max}
     onclick={() => set(value + step)}
-    class={['h-11 text-[22px] leading-none disabled:opacity-40', compact ? 'w-10' : 'w-11']}>+</button
+    class="h-11 w-11 text-[22px] leading-none disabled:opacity-40">+</button
   >
 </div>

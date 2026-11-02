@@ -62,21 +62,3 @@ export function capitalize(s: string): string {
 export function modeName(mode: string): string {
   return capitalize(mode.split('_')[0]);
 }
-
-/**
- * How far a room is from target, as the design's chip says it: "On target" within 0.5°,
- * otherwise "1.4° too warm" / "0.8° too cool". `gap` is temperature minus target.
- */
-export function gapChip(gap: number): {
-  text: string;
-  tone: 'none' | 'warm' | 'cool';
-  far: boolean;
-} {
-  const a = Math.abs(gap);
-  if (a < 0.5) return { text: 'On target', tone: 'none', far: false };
-  return {
-    text: `${a.toFixed(1)}° ${gap > 0 ? 'too warm' : 'too cool'}`,
-    tone: gap > 0 ? 'warm' : 'cool',
-    far: a >= 1.5,
-  };
-}

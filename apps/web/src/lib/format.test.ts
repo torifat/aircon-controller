@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vite-plus/test';
 
-import { ago, countdown, dayLabel, deg, duration, gapChip, modeName } from './format';
+import { ago, countdown, dayLabel, deg, duration, modeName } from './format';
 
 describe('format', () => {
   test('deg', () => {
@@ -37,11 +37,5 @@ describe('format', () => {
   test('modeName', () => {
     expect(modeName('auto_cool')).toBe('Auto');
     expect(modeName('cool')).toBe('Cool');
-  });
-
-  test('gapChip', () => {
-    expect(gapChip(0.3)).toEqual({ text: 'On target', tone: 'none', far: false });
-    expect(gapChip(2.9)).toEqual({ text: '2.9° too warm', tone: 'warm', far: true });
-    expect(gapChip(-0.8)).toEqual({ text: '0.8° too cool', tone: 'cool', far: false });
   });
 });

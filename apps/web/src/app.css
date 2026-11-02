@@ -17,6 +17,7 @@
   --cool-bg: #e2edf8;
   --warm: #975304;
   --warm-bg: #faedda;
+  --go: #317a45;
   --err: #b5332a;
   --err-bg: #fbe5e2;
   --knob: #ffffff;
@@ -36,6 +37,7 @@
   --cool-bg: rgb(102 177 242 / 0.15);
   --warm: #f2a848;
   --warm-bg: rgb(242 168 72 / 0.15);
+  --go: #6cc581;
   --err: #f27063;
   --err-bg: rgb(242 112 99 / 0.15);
   --knob: #e9edef;
@@ -56,6 +58,7 @@
     --cool-bg: rgb(102 177 242 / 0.15);
     --warm: #f2a848;
     --warm-bg: rgb(242 168 72 / 0.15);
+    --go: #6cc581;
     --err: #f27063;
     --err-bg: rgb(242 112 99 / 0.15);
     --knob: #e9edef;
@@ -76,6 +79,7 @@
   --color-cool-bg: var(--cool-bg);
   --color-warm: var(--warm);
   --color-warm-bg: var(--warm-bg);
+  --color-go: var(--go);
   --color-err: var(--err);
   --color-err-bg: var(--err-bg);
   --color-knob: var(--knob);

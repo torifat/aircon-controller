@@ -60,11 +60,11 @@
           'Controller enabled',
           s.enabled ? 'Climate is adjusting fan, AC setpoint and dampers' : 'Off — rooms keep their last opening',
         )}
-        <Switch checked={s.enabled} label="Controller enabled" onchange={(v) => save({ enabled: v })} />
+        <Switch setting checked={s.enabled} label="Controller enabled" onchange={(v) => save({ enabled: v })} />
       </div>
       <div class={[line, 'border-t border-line']}>
         {@render row('Dry run', 'Log decisions without sending them to the AC')}
-        <Switch checked={s.dry_run} label="Dry run" onchange={(v) => save({ dry_run: v })} />
+        <Switch setting checked={s.dry_run} label="Dry run" onchange={(v) => save({ dry_run: v })} />
       </div>
     </div>
 

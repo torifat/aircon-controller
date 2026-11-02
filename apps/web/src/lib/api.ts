@@ -39,7 +39,11 @@ export const api = {
   state: () => request<StateResponse>('GET', '/api/state'),
   /** Run a check now and return the fresh state. */
   tick: () => request<StateResponse>('POST', '/api/tick'),
-  history: (hours: number) => request<HistoryResponse>('GET', `/api/history?hours=${hours}`),
+  history: (hours: number, step?: number) =>
+    request<HistoryResponse>(
+      'GET',
+      `/api/history?hours=${hours}${step != null ? `&step=${step}` : ''}`,
+    ),
   activity: (opts: { kind?: ActivityKind; before?: number; limit?: number } = {}) => {
     const q = new URLSearchParams();
     if (opts.kind) q.set('kind', opts.kind);
