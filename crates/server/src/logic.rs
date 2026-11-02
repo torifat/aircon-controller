@@ -6,7 +6,8 @@
 //!
 //! - fan steps Low / Medium / High with the size of that gap;
 //! - the AC setpoint is pulled away from the AC's own reading by the gap, so the inverter
-//!   compressor works hard when rooms are far off and idles near target;
+//!   compressor works hard when rooms are far off, and sits at that reading within
+//!   `ease_within` of target so it idles;
 //! - when every active zone reaches target the AC is turned off ("parked"), and turned back
 //!   on once any zone drifts `deadband` degrees past its target;
 //! - min on/off times protect the compressor;
@@ -70,12 +71,25 @@ pub fn fan_for(gap: f64, current: Fan, s: &Settings, available: &[Fan]) -> Fan {
 }
 
 /// AC setpoint that makes the inverter work in proportion to the worst gap.
+///
+/// Within `ease_within` of target it sits at the AC's own reading instead, rounded away
+/// from work, so the compressor idles: on a Low fan a working compressor sends out a
+/// trickle of very cold (or hot) air.
 pub fn setpoint_for(ac: &AcReading, worst: &ZoneEval, s: &Settings) -> f64 {
     let reference = ac.temperature.or(worst.target).unwrap_or(24.0);
-    let offset = (s.setpoint_gain * worst.error.unwrap_or(0.0).max(0.0)).min(s.max_setpoint_offset);
-    let raw = reference - ac.direction.sign() * offset;
-    let stepped = (raw / s.setpoint_step).round() * s.setpoint_step;
-    ac.limits.clamp(stepped, ac.direction)
+    let gap = worst.error.unwrap_or(0.0).max(0.0);
+    let steps = if gap < s.ease_within {
+        let steps = reference / s.setpoint_step;
+        if ac.direction == Direction::Heat {
+            steps.floor()
+        } else {
+            steps.ceil()
+        }
+    } else {
+        let offset = (s.setpoint_gain * gap).min(s.max_setpoint_offset);
+        ((reference - ac.direction.sign() * offset) / s.setpoint_step).round()
+    };
+    ac.limits.clamp(steps * s.setpoint_step, ac.direction)
 }
 
 /// Fan + setpoint command with only the fields that change (all of them when `force`).
@@ -1063,5 +1077,43 @@ mod tests {
             damper(&s, &live(), &rt, NOW),
             Some(Damper::Open { zone: 1, .. })
         ));
+    }
+
+    fn eval(error: f64) -> ZoneEval {
+        ZoneEval {
+            number: 3,
+            name: "Study".into(),
+            active: true,
+            target: Some(24.0),
+            error: Some(error),
+        }
+    }
+
+    #[test]
+    fn near_target_the_compressor_idles() {
+        // 12:52 on Nov 2: Study 0.6° over, return air 23.6°. It used to get 23°, a degree
+        // of work on a Low fan; now the setpoint sits at the reading, rounded up.
+        let ac = AcReading {
+            temperature: Some(23.6),
+            ..cool()
+        };
+        assert_eq!(setpoint_for(&ac, &eval(0.6), &live()), 24.0);
+        // Past `ease_within` it works again, by the whole gap.
+        assert_eq!(setpoint_for(&ac, &eval(1.4), &live()), 22.0);
+        // 0 turns easing off.
+        let off = Settings {
+            ease_within: 0.0,
+            ..live()
+        };
+        assert_eq!(setpoint_for(&ac, &eval(0.6), &off), 23.0);
+    }
+
+    #[test]
+    fn heating_eases_downwards() {
+        let ac = AcReading {
+            temperature: Some(21.4),
+            ..ac("heat")
+        };
+        assert_eq!(setpoint_for(&ac, &eval(0.6), &live()), 21.0);
     }
 }

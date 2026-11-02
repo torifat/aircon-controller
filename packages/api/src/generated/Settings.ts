@@ -24,7 +24,12 @@ fan_hysteresis: number,
 /**
  * AC setpoint = AC temperature -/+ gain * worst gap, capped at max offset.
  */
-setpoint_gain: number, max_setpoint_offset: number, setpoint_step: number, min_on_minutes: number, min_off_minutes: number, manual_pause_minutes: number, tick_seconds: number, 
+setpoint_gain: number, max_setpoint_offset: number, 
+/**
+ * Below this gap the AC setpoint sits at the AC's own reading, so the compressor
+ * idles and the air comes out milder. 0 turns it off.
+ */
+ease_within: number, setpoint_step: number, min_on_minutes: number, min_off_minutes: number, manual_pause_minutes: number, tick_seconds: number, 
 /**
  * Zones that count; `None` means every zone that's switched on.
  */

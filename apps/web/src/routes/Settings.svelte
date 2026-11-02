@@ -85,6 +85,11 @@
         <Stepper value={s.fan_medium_at} step={0.5} min={0.5} max={s.fan_high_at - 0.5}
           label="fan Medium threshold" format={(v) => deg(v)} onchange={(v) => save({ fan_medium_at: v })} />
       </div>
+      <div class={[line, 'border-t border-line']}>
+        {@render row('Ease off within', 'Closer than this, the compressor idles so the air comes out milder')}
+        <Stepper value={s.ease_within} step={0.5} min={0} max={3} label="ease off within"
+          format={(v) => (v ? deg(v) : 'Off')} onchange={(v) => save({ ease_within: v })} />
+      </div>
       <div class="border-t border-line px-4 pt-3 pb-4">
         <div aria-hidden="true" class="flex h-2 overflow-hidden rounded-full">
           <span class="bg-cool opacity-30" style:flex={s.fan_medium_at}></span>

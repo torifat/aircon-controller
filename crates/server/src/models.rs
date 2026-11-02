@@ -175,6 +175,9 @@ pub struct Settings {
     /// AC setpoint = AC temperature -/+ gain * worst gap, capped at max offset.
     pub setpoint_gain: f64,
     pub max_setpoint_offset: f64,
+    /// Below this gap the AC setpoint sits at the AC's own reading, so the compressor
+    /// idles and the air comes out milder. 0 turns it off.
+    pub ease_within: f64,
     pub setpoint_step: f64,
     pub min_on_minutes: f64,
     pub min_off_minutes: f64,
@@ -198,6 +201,7 @@ impl Default for Settings {
             fan_hysteresis: 0.2,
             setpoint_gain: 1.0,
             max_setpoint_offset: 3.0,
+            ease_within: 1.0,
             setpoint_step: 1.0,
             min_on_minutes: 5.0,
             min_off_minutes: 5.0,

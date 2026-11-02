@@ -3,4 +3,4 @@
 /**
  * Partial settings update. `"zones": null` means "whichever rooms are on".
  */
-export type SettingsPatch = { enabled?: boolean, dry_run?: boolean, deadband?: number, fan_medium_at?: number, fan_high_at?: number, fan_hysteresis?: number, setpoint_gain?: number, max_setpoint_offset?: number, setpoint_step?: number, min_on_minutes?: number, min_off_minutes?: number, manual_pause_minutes?: number, tick_seconds?: number, zones?: Array<number> | null, targets?: { [key in number]: number }, };
+export type SettingsPatch = { enabled?: boolean, dry_run?: boolean, deadband?: number, fan_medium_at?: number, fan_high_at?: number, fan_hysteresis?: number, setpoint_gain?: number, max_setpoint_offset?: number, ease_within?: number, setpoint_step?: number, min_on_minutes?: number, min_off_minutes?: number, manual_pause_minutes?: number, tick_seconds?: number, zones?: Array<number> | null, targets?: { [key in number]: number }, };

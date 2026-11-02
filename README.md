@@ -7,7 +7,9 @@ drives the AC itself from the zone sensors:
 - **Fan** steps Low / Medium / High with the gap between the worst active room and its
   target (1° and 2° by default, with a 0.2° margin before stepping down).
 - **AC setpoint** is pulled below (cooling) or above (heating) the AC's own reading by that
-  gap, so the inverter works hard when rooms are far off and idles near target.
+  gap, so the inverter works hard when rooms are far off. Within 1° of target (**ease off
+  within**) it sits at the AC's reading instead, so the compressor idles and a Low fan doesn't
+  blow a trickle of very cold air.
 - **Off at target**: when every active room reaches target the AC is turned off, and back on
   once one drifts 2° past it. Min 5 min on / 5 min off protects the compressor.
 - **Hands off**: an AC switched off by someone else is never turned back on; a fan, setpoint
