@@ -179,14 +179,21 @@ pub struct Settings {
     /// idles and the air comes out milder. 0 turns it off.
     pub ease_within: f64,
     pub setpoint_step: f64,
+    /// Damper opening, in percent, for a room at or past target. The room furthest from
+    /// target is always fully open.
+    pub damper_min: f64,
+    /// A room this far from target is fully open; between this and target it closes
+    /// gradually to `damper_min`.
+    pub damper_full_at: f64,
     pub min_on_minutes: f64,
     pub min_off_minutes: f64,
     pub manual_pause_minutes: f64,
     pub tick_seconds: f64,
     /// Zones that count; `None` means every zone that's switched on.
     pub zones: Option<Vec<u8>>,
-    /// Targets for zones in percentage control, where the AirTouch app can't change the
-    /// setpoint. Zones in temperature control use their AirTouch setpoint.
+    /// Targets for zones in percentage control, which is all of them while the controller
+    /// runs the dampers: the AirTouch ignores setpoints there. Zones still in temperature
+    /// control use their AirTouch setpoint.
     pub targets: BTreeMap<u8, f64>,
 }
 
@@ -203,6 +210,8 @@ impl Default for Settings {
             max_setpoint_offset: 3.0,
             ease_within: 1.0,
             setpoint_step: 1.0,
+            damper_min: 10.0,
+            damper_full_at: 1.0,
             min_on_minutes: 5.0,
             min_off_minutes: 5.0,
             manual_pause_minutes: 30.0,
@@ -265,12 +274,6 @@ pub struct Runtime {
     pub last_power_change: Option<f64>,
     pub last_seen_power: Option<bool>,
     pub expected: Option<Expected>,
-    /// The lone room we switched to percentage control and opened fully. Its target is in
-    /// `Settings::targets` until it's handed back.
-    pub opened: Option<u8>,
-    /// We've asked for `opened` to go back to temperature control; it's kept until the
-    /// console reports that it has, and asked again each check until then.
-    pub handing_back: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

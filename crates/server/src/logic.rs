@@ -13,12 +13,13 @@
 //! - min on/off times protect the compressor;
 //! - a fan/setpoint/mode change made outside the controller pauses it for a while.
 //!
-//! With a single room on, the AirTouch closing that room's damper near target only pushes
-//! air into the spill zone, so `damper()` opens it fully and the AC alone holds it.
+//! Rooms run in percentage control with `damper_moves()` setting their openings: the
+//! AirTouch resets the AC setpoint to the room targets while any room is in temperature
+//! control, and its own damper logic spills whatever it throttles.
 
 use crate::models::{
     AcReading, ActivityKind, Command, Decision, Direction, Event, Expected, FAN_LEVELS, Fan,
-    Runtime, Settings, Snapshot, Status, ZoneControl, ZoneEval, ZoneReading,
+    Runtime, Settings, Snapshot, Status, ZoneControl, ZoneEval,
 };
 
 const SETPOINT_TOLERANCE: f64 = 0.05;
@@ -384,92 +385,78 @@ pub fn decide(snap: &Snapshot, s: &Settings, rt: &Runtime, now: f64) -> (Decisio
     )
 }
 
-/// A change to a room's damper for the lone-room rule.
+/// A damper the controller wants moved, and the room switched to percentage control first
+/// if it isn't in it yet.
 #[derive(Debug, Clone, PartialEq)]
-pub enum Damper {
-    /// Switch the only room on to percentage control at 100%, keeping its target here.
-    Open { zone: u8, name: String, target: f64 },
-    /// Hand a room we opened back to the AirTouch's temperature control at its target.
-    Restore {
-        zone: u8,
-        name: String,
-        target: f64,
-        reason: String,
-    },
-    /// The room we opened is back in temperature control (as asked, or from the app) or is
-    /// gone; stop tracking it.
-    Release,
+pub struct DamperMove {
+    pub zone: u8,
+    pub name: String,
+    /// Opening now, 0.0-1.0.
+    pub from: f64,
+    /// Opening wanted, in percent.
+    pub to: u8,
+    /// The room is in temperature control and gets switched to percentage control.
+    pub switch: bool,
+    /// Its AirTouch setpoint, which becomes the target we keep when it's switched.
+    pub setpoint: Option<f64>,
 }
 
-/// Open the only room on fully, and hand it back once it isn't the only one.
+/// Damper movements are only sent past this many percentage points, or to reach a fully
+/// open or fully throttled room, so small wobbles in a reading don't move them every check.
+const DAMPER_SETTLE: f64 = 10.0;
+
+/// Opening for a room `error` degrees from target (positive = needs work): the minimum at
+/// or past target, fully open from `damper_full_at` away, in 5% steps between.
+pub fn opening_for(error: f64, s: &Settings) -> u8 {
+    let min = s.damper_min.clamp(0.0, 100.0);
+    let share = (error / s.damper_full_at).clamp(0.0, 1.0);
+    ((min + (100.0 - min) * share) / 5.0).round() as u8 * 5
+}
+
+/// The damper moves to make this check.
 ///
-/// `rt` is the runtime after this tick's `decide`, so a pause it started counts. Opening
-/// waits for the controller to be live; handing back doesn't, so turning the controller
-/// off or to dry run never leaves a room stuck open.
-pub fn damper(snap: &Snapshot, s: &Settings, rt: &Runtime, now: f64) -> Option<Damper> {
-    let live = s.enabled && !s.dry_run && rt.paused_until.is_none_or(|t| now >= t);
-    let counted = |z: &ZoneReading| s.zones.as_ref().is_none_or(|zs| zs.contains(&z.number));
-    let on: Vec<&ZoneReading> = snap.zones.iter().filter(|z| z.on).collect();
-
-    if let Some(n) = rt.opened {
-        let Some(z) = snap.zones.iter().find(|z| z.number == n) else {
-            return Some(Damper::Release);
-        };
-        if z.control == ZoneControl::Temperature {
-            return Some(Damper::Release);
-        }
-        let reason = if !z.on {
-            format!("{} turned off", z.name)
-        } else if on.len() > 1 {
-            let others: Vec<&str> = on
-                .iter()
-                .filter(|o| o.number != n)
-                .map(|o| o.name.as_str())
-                .collect();
-            format!(
-                "{} on too; AirTouch balances the rooms again",
-                others.join(", ")
-            )
-        } else if !s.enabled {
-            "Controller is off".to_owned()
-        } else if s.dry_run {
-            "Dry run".to_owned()
-        } else if !counted(z) {
-            format!("{} no longer counts", z.name)
-        } else if !live {
-            "Controller paused".to_owned()
-        } else if rt.handing_back {
-            // Alone again before the hand back took: keep it open after all.
-            return Some(Damper::Open {
-                zone: n,
+/// With a temperature-control room on, the AirTouch keeps resetting the AC setpoint to the
+/// room targets, so every room is switched to percentage control (its setpoint becomes the
+/// target kept here) and its damper follows its gap: the room needing it most fully open,
+/// others closing down to `damper_min` as they reach target. The neediest room staying at
+/// 100% keeps the total open enough that nothing spills. Rooms that are off, have no
+/// sensor or don't count keep their opening, once in percentage control.
+pub fn damper_moves(snap: &Snapshot, zones: &[ZoneEval], s: &Settings) -> Vec<DamperMove> {
+    let neediest = zones
+        .iter()
+        .filter(|z| z.active)
+        .max_by(|a, b| a.error.unwrap_or(0.0).total_cmp(&b.error.unwrap_or(0.0)))
+        .map(|z| z.number);
+    snap.zones
+        .iter()
+        .filter_map(|z| {
+            let eval = zones.iter().find(|e| e.number == z.number);
+            let wanted = match eval {
+                Some(e) if e.active && Some(e.number) == neediest => Some(100),
+                Some(e) if e.active => e.error.map(|err| opening_for(err, s)),
+                _ => None,
+            };
+            let switch = z.control == ZoneControl::Temperature;
+            let now = z.damper * 100.0;
+            let to = match wanted {
+                Some(to) => to,
+                // Not ours to aim yet: switch it fully open, which never causes spill.
+                None if switch => 100,
+                None => return None,
+            };
+            let at_end = to == 100 || f64::from(to) <= s.damper_min;
+            let moved = (f64::from(to) - now).abs();
+            let needed = switch || moved >= DAMPER_SETTLE || (at_end && moved >= 2.5);
+            needed.then(|| DamperMove {
+                zone: z.number,
                 name: z.name.clone(),
-                target: s.targets.get(&n).copied().or(z.setpoint)?,
-            });
-        } else {
-            return None;
-        };
-        let Some(target) = s.targets.get(&n).copied().or(z.setpoint) else {
-            return Some(Damper::Release);
-        };
-        return Some(Damper::Restore {
-            zone: n,
-            name: z.name.clone(),
-            target,
-            reason,
-        });
-    }
-
-    let [z] = on.as_slice() else {
-        return None;
-    };
-    if !live || !counted(z) || z.control != ZoneControl::Temperature || !z.has_sensor {
-        return None;
-    }
-    Some(Damper::Open {
-        zone: z.number,
-        name: z.name.clone(),
-        target: z.setpoint?,
-    })
+                from: z.damper,
+                to,
+                switch,
+                setpoint: z.setpoint,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -943,140 +930,88 @@ mod tests {
         assert_eq!(d.status, Status::Standby);
     }
 
-    fn opened(n: u8) -> Runtime {
-        Runtime {
-            opened: Some(n),
-            ..Runtime::default()
-        }
-    }
-
     fn off(z: ZoneReading) -> ZoneReading {
         ZoneReading { on: false, ..z }
     }
 
-    fn held_open(z: ZoneReading) -> ZoneReading {
+    fn pct(z: ZoneReading, open: f64) -> ZoneReading {
         ZoneReading {
             control: ZoneControl::Percentage,
-            damper: 1.0,
+            damper: open,
             ..z
         }
     }
 
-    #[test]
-    fn lone_room_opens_fully() {
-        let s = snap(
-            cool(),
-            vec![named("Mouni", zone(1, 24.3)), off(zone(2, 23.5))],
-        );
-        let open = Damper::Open {
-            zone: 1,
-            name: "Mouni".into(),
-            target: 24.0,
-        };
-        assert_eq!(damper(&s, &live(), &Runtime::default(), NOW), Some(open));
-        // Not in dry run, while paused, or with the controller off.
-        assert_eq!(
-            damper(&s, &Settings::default(), &Runtime::default(), NOW),
-            None
-        );
-        let paused = Runtime {
-            paused_until: Some(NOW + 60.0),
-            ..Runtime::default()
-        };
-        assert_eq!(damper(&s, &live(), &paused, NOW), None);
-        let disabled = Settings {
-            enabled: false,
-            ..live()
-        };
-        assert_eq!(damper(&s, &disabled, &Runtime::default(), NOW), None);
+    fn moves(s: &Snapshot) -> Vec<(u8, u8, bool)> {
+        let settings = live();
+        damper_moves(s, &evaluate_zones(s, &settings), &settings)
+            .into_iter()
+            .map(|m| (m.zone, m.to, m.switch))
+            .collect()
     }
 
     #[test]
-    fn several_rooms_stay_with_the_airtouch() {
-        let s = snap(cool(), vec![zone(1, 24.3), zone(2, 25.0)]);
-        assert_eq!(damper(&s, &live(), &Runtime::default(), NOW), None);
+    fn openings_follow_the_gap() {
+        let s = live();
+        assert_eq!(opening_for(-0.5, &s), 10);
+        assert_eq!(opening_for(0.0, &s), 10);
+        assert_eq!(opening_for(0.5, &s), 55);
+        assert_eq!(opening_for(0.3, &s), 35);
+        assert_eq!(opening_for(1.0, &s), 100);
+        assert_eq!(opening_for(2.5, &s), 100);
     }
 
     #[test]
-    fn lone_room_needs_temperature_control_and_to_count() {
-        let pct = ZoneReading {
-            control: ZoneControl::Percentage,
-            ..zone(1, 24.3)
-        };
-        let s = snap(cool(), vec![pct]);
-        assert_eq!(damper(&s, &live(), &Runtime::default(), NOW), None);
-        let s = snap(cool(), vec![zone(1, 24.3)]);
-        let elsewhere = Settings {
-            zones: Some(vec![2]),
-            ..live()
-        };
-        assert_eq!(damper(&s, &elsewhere, &Runtime::default(), NOW), None);
-    }
-
-    #[test]
-    fn opened_room_stays_open_while_alone() {
-        let s = snap(cool(), vec![held_open(zone(1, 24.3)), off(zone(2, 23.5))]);
-        assert_eq!(damper(&s, &live(), &opened(1), NOW), None);
-    }
-
-    #[test]
-    fn second_room_hands_back() {
-        let mut settings = live();
-        settings.targets.insert(1, 23.5);
+    fn neediest_room_is_fully_open_and_others_close_down() {
+        // This afternoon: Study 0.8° over, Mouni 0.5° under at 100% and getting colder.
         let s = snap(
             cool(),
             vec![
-                named("Mouni", held_open(zone(1, 24.3))),
-                named("Study", zone(2, 25.0)),
+                pct(named("Study", zone(3, 24.8)), 0.85),
+                pct(named("Mouni", zone(2, 23.5)), 1.0),
+                off(pct(zone(1, 25.3), 0.05)),
             ],
         );
-        assert_eq!(
-            damper(&s, &settings, &opened(1), NOW),
-            Some(Damper::Restore {
-                zone: 1,
-                name: "Mouni".into(),
-                target: 23.5,
-                reason: "Study on too; AirTouch balances the rooms again".into(),
-            })
+        assert_eq!(moves(&s), vec![(3, 100, false), (2, 10, false)]);
+    }
+
+    #[test]
+    fn small_wobbles_dont_move_dampers() {
+        let s = snap(
+            cool(),
+            vec![pct(zone(3, 25.5), 1.0), pct(zone(2, 24.3), 0.40)],
         );
+        // Zone 2 wants 35%: 5 points off isn't worth a move.
+        assert_eq!(moves(&s), vec![]);
+        // But closing the last bit to the minimum is.
+        let s = snap(
+            cool(),
+            vec![pct(zone(3, 25.5), 1.0), pct(zone(2, 23.9), 0.15)],
+        );
+        assert_eq!(moves(&s), vec![(2, 10, false)]);
     }
 
     #[test]
-    fn hands_back_when_off_or_not_live() {
-        let s = snap(cool(), vec![named("Mouni", off(held_open(zone(1, 24.3))))]);
-        let Some(Damper::Restore { reason, .. }) = damper(&s, &live(), &opened(1), NOW) else {
-            panic!("expected a restore");
-        };
-        assert_eq!(reason, "Mouni turned off");
-
-        let s = snap(cool(), vec![held_open(zone(1, 24.3))]);
-        let Some(Damper::Restore { reason, .. }) =
-            damper(&s, &Settings::default(), &opened(1), NOW)
-        else {
-            panic!("expected a restore");
-        };
-        assert_eq!(reason, "Dry run");
+    fn temperature_control_rooms_are_switched() {
+        let s = snap(
+            cool(),
+            vec![zone(3, 24.8), off(zone(1, 24.0)), pct(zone(2, 24.0), 0.1)],
+        );
+        // On: aimed like any room. Off: switched fully open, which never spills.
+        assert_eq!(moves(&s), vec![(3, 100, true), (1, 100, true)]);
     }
 
     #[test]
-    fn room_switched_back_in_the_app_is_released() {
-        let s = snap(cool(), vec![zone(1, 24.3)]);
-        assert_eq!(damper(&s, &live(), &opened(1), NOW), Some(Damper::Release));
-        let s = snap(cool(), vec![zone(2, 24.3)]);
-        assert_eq!(damper(&s, &live(), &opened(1), NOW), Some(Damper::Release));
-    }
-
-    #[test]
-    fn alone_again_while_handing_back_reopens() {
-        let s = snap(cool(), vec![named("Mouni", held_open(zone(1, 24.3)))]);
-        let rt = Runtime {
-            handing_back: true,
-            ..opened(1)
+    fn rooms_that_dont_count_are_left_alone() {
+        let s = snap(
+            cool(),
+            vec![pct(zone(3, 25.0), 1.0), pct(zone(2, 22.0), 0.6)],
+        );
+        let settings = Settings {
+            zones: Some(vec![3]),
+            ..live()
         };
-        assert!(matches!(
-            damper(&s, &live(), &rt, NOW),
-            Some(Damper::Open { zone: 1, .. })
-        ));
+        assert!(damper_moves(&s, &evaluate_zones(&s, &settings), &settings).is_empty());
     }
 
     fn eval(error: f64) -> ZoneEval {

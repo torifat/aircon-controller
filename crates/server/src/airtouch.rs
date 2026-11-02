@@ -372,7 +372,7 @@ impl Device for AirTouch {
                     z.power = if on { ZonePower::On } else { ZonePower::Off };
                 }
                 // A switch between temperature and percentage control is left for the
-                // console to report: the controller waits on it to know the switch took.
+                // console to report: the next check sends the move again if it didn't take.
                 if let Some(ZoneValue::Setpoint(c)) = value {
                     z.setpoint = Some(c);
                 }

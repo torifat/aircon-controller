@@ -149,8 +149,6 @@ pub struct ZoneState {
     pub active: bool,
     /// The zone furthest from target, which sets fan and setpoint.
     pub driving: bool,
-    /// The only room on, opened fully by the controller so nothing spills.
-    pub held_open: bool,
 }
 
 #[derive(Serialize, TS)]
@@ -223,7 +221,6 @@ async fn build_state<D: Device>(c: &Controller<D>) -> StateResponse {
                         error: eval.and_then(|e| e.error),
                         active: eval.is_some_and(|e| e.active),
                         driving: worst == Some(z.number),
-                        held_open: st.runtime.opened == Some(z.number) && !st.runtime.handing_back,
                     }
                 })
                 .collect()
@@ -429,6 +426,8 @@ pub struct SettingsPatch {
     pub max_setpoint_offset: Option<f64>,
     pub ease_within: Option<f64>,
     pub setpoint_step: Option<f64>,
+    pub damper_min: Option<f64>,
+    pub damper_full_at: Option<f64>,
     pub min_on_minutes: Option<f64>,
     pub min_off_minutes: Option<f64>,
     pub manual_pause_minutes: Option<f64>,
@@ -473,6 +472,8 @@ impl SettingsPatch {
         in_range("max_setpoint_offset", self.max_setpoint_offset, 0.0, 6.0)?;
         in_range("ease_within", self.ease_within, 0.0, 3.0)?;
         in_range("setpoint_step", self.setpoint_step, 0.5, 1.0)?;
+        in_range("damper_min", self.damper_min, 0.0, 50.0)?;
+        in_range("damper_full_at", self.damper_full_at, 0.5, 3.0)?;
         in_range("min_on_minutes", self.min_on_minutes, 0.0, 30.0)?;
         in_range("min_off_minutes", self.min_off_minutes, 0.0, 30.0)?;
         in_range(
@@ -502,6 +503,8 @@ impl SettingsPatch {
             max_setpoint_offset,
             ease_within,
             setpoint_step,
+            damper_min,
+            damper_full_at,
             min_on_minutes,
             min_off_minutes,
             manual_pause_minutes,

@@ -29,13 +29,24 @@ setpoint_gain: number, max_setpoint_offset: number,
  * Below this gap the AC setpoint sits at the AC's own reading, so the compressor
  * idles and the air comes out milder. 0 turns it off.
  */
-ease_within: number, setpoint_step: number, min_on_minutes: number, min_off_minutes: number, manual_pause_minutes: number, tick_seconds: number, 
+ease_within: number, setpoint_step: number, 
+/**
+ * Damper opening, in percent, for a room at or past target. The room furthest from
+ * target is always fully open.
+ */
+damper_min: number, 
+/**
+ * A room this far from target is fully open; between this and target it closes
+ * gradually to `damper_min`.
+ */
+damper_full_at: number, min_on_minutes: number, min_off_minutes: number, manual_pause_minutes: number, tick_seconds: number, 
 /**
  * Zones that count; `None` means every zone that's switched on.
  */
 zones: Array<number> | null, 
 /**
- * Targets for zones in percentage control, where the AirTouch app can't change the
- * setpoint. Zones in temperature control use their AirTouch setpoint.
+ * Targets for zones in percentage control, which is all of them while the controller
+ * runs the dampers: the AirTouch ignores setpoints there. Zones still in temperature
+ * control use their AirTouch setpoint.
  */
 targets: { [key in number]: number }, };

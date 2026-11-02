@@ -71,10 +71,9 @@
         {#if zone.spill}
           <span class="rounded-md border border-line px-1.5 py-0.5 font-medium text-mu">Spill</span>
         {/if}
-        {#if zone.held_open}
-          <span class="rounded-md border border-line px-1.5 py-0.5 font-medium text-mu">Fully open</span>
-        {:else if zone.control === 'percentage'}
-          <span class="rounded-md border border-line px-1.5 py-0.5 font-medium text-mu">% control</span>
+        {#if zone.control === 'temperature'}
+          <!-- Rooms normally run in percentage control with Climate setting the damper. -->
+          <span class="rounded-md border border-line px-1.5 py-0.5 font-medium text-mu">AirTouch control</span>
         {/if}
         {#if zone.low_battery}
           <span class="inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 font-medium text-warm">

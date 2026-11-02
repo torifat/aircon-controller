@@ -19,7 +19,6 @@ function zone(number: number, name: string, temperature: number, on = true): Zon
     error: on ? Math.round((temperature - 24) * 100) / 100 : null,
     active: on,
     driving: false,
-    held_open: false,
   };
 }
 

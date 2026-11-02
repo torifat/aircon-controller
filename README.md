@@ -1,8 +1,8 @@
 # aircon-controller
 
 Throttles a ducted Daikin behind an AirTouch 5 so rooms hold temperature without the spill
-zone freezing. The AirTouch still owns zones (on/off, setpoints, dampers); this controller
-drives the AC itself from the zone sensors:
+zone freezing. Rooms run in percentage control and this controller drives both the dampers
+and the AC from the zone sensors; everyone uses the Climate UI rather than the AirTouch app:
 
 - **Fan** steps Low / Medium / High with the gap between the worst active room and its
   target (1° and 2° by default, with a 0.2° margin before stepping down).
@@ -13,14 +13,15 @@ drives the AC itself from the zone sensors:
 - **Off at target**: when every active room reaches target the AC is turned off, and back on
   once one drifts 2° past it. Min 5 min on / 5 min off protects the compressor.
 - **Hands off**: an AC switched off by someone else is never turned back on; a fan, setpoint
-  or mode change made in the AirTouch app pauses the controller for 30 min. Zone changes
-  don't pause: they're how you steer it.
-- **One room on**: the AirTouch would close its damper near target and spill the rest, so
-  the controller switches that room to percentage control at 100% and holds its target with
-  the AC alone. It goes back to temperature control when another room comes on, it's turned
-  off, or the controller is off, paused or in dry run.
-- Rooms in **percentage control** have no usable AirTouch setpoint, so their target is kept
-  here (set from the UI).
+  or mode change made in the AirTouch app pauses the controller for 30 min, and its dampers
+  too. Turning rooms on and off doesn't pause: that's how you steer it.
+- **Dampers**: the room furthest from target is fully open, so nothing spills; the others
+  close gradually as they near target, from 100% at 1° off down to 10% at target. Moves under
+  10 points wait, so small wobbles don't move them every minute.
+- **Percentage control, always**: with any room in temperature control the AirTouch resets the
+  AC setpoint to the room targets (and spills what it throttles), so the controller switches
+  rooms to percentage control, taking over their AirTouch setpoint as the target. Targets are
+  kept here and set from the UI. Off or paused, the controller leaves dampers where they are.
 
 Starts in **dry run**: decisions are logged ("Would: …") but nothing is sent.
 

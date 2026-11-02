@@ -9,11 +9,7 @@ target: number | null, error: number | null, active: boolean,
 /**
  * The zone furthest from target, which sets fan and setpoint.
  */
-driving: boolean, 
-/**
- * The only room on, opened fully by the controller so nothing spills.
- */
-held_open: boolean, number: number, name: string, on: boolean, control: ZoneControl, 
+driving: boolean, number: number, name: string, on: boolean, control: ZoneControl, 
 /**
  * The AirTouch's own zone setpoint.
  */

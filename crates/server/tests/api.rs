@@ -84,6 +84,12 @@ impl Fake {
         self.sent.lock().unwrap().clone()
     }
 
+    fn sent_ac(&self) -> Vec<Sent> {
+        let mut sent = self.sent();
+        sent.retain(|s| matches!(s, Sent::Ac(_)));
+        sent
+    }
+
     fn set_connected(&self, on: bool) {
         self.connected.store(on, Ordering::SeqCst);
     }
@@ -272,9 +278,10 @@ async fn dry_run_by_default_sends_nothing() {
         "fan high, setpoint 21°"
     );
     assert!(env.fake.sent().is_empty());
-    assert_eq!(
-        env.titles(&[]).await[0],
-        "Would: Fan Low → High · AC setpoint 24.0° → 21.0°"
+    let titles = env.titles(&[]).await;
+    assert!(
+        titles.contains(&"Would: Fan Low → High · AC setpoint 24.0° → 21.0°".to_owned()),
+        "{titles:?}"
     );
 }
 
@@ -288,7 +295,7 @@ async fn live_run_sends_and_reports() {
         fan: Some(Fan::High),
         setpoint: Some(21.0),
     };
-    assert_eq!(env.fake.sent(), vec![Sent::Ac(want)]);
+    assert_eq!(env.fake.sent_ac(), vec![Sent::Ac(want)]);
     let study = zone_json(&state, "Study");
     assert_eq!(study["driving"], true);
     assert_eq!(study["error"], 2.9);
@@ -495,14 +502,17 @@ async fn ac_power_from_ui_hands_control_back() {
     let state = env.tick().await;
     assert_eq!(state["controller"]["status"], "off");
     assert_eq!(
-        env.fake.sent().last(),
+        env.fake.sent_ac().last(),
         Some(&Sent::Ac(Command {
             power: Some(false),
             ..Command::default()
         }))
     );
     assert!(
-        env.titles(&["external"]).await.is_empty(),
+        !env.titles(&["external"])
+            .await
+            .iter()
+            .any(|t| t.starts_with("AC")),
         "our own off isn't a manual change"
     );
 }
@@ -563,85 +573,21 @@ async fn dry_run_logs_a_repeated_decision_once() {
         env.tick().await;
         env.advance(60.0);
     }
-    let would: Vec<_> = env
-        .titles(&["decision"])
-        .await
-        .into_iter()
-        .filter(|t| t.starts_with("Would:"))
-        .collect();
-    assert_eq!(would.len(), 1, "{would:?}");
+    let would = async || {
+        env.titles(&["decision"])
+            .await
+            .into_iter()
+            .filter(|t| t.starts_with("Would: Fan") || t.starts_with("Would: AC"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(would().await.len(), 1, "{:?}", would().await);
+    let dampers = env.titles(&["decision"]).await.len() - 1;
+    assert_eq!(dampers, 1, "damper moves are logged once too");
 
     // A different decision is logged again.
     env.fake.zones.lock().unwrap()[2].temperature = Some(25.5);
     env.tick().await;
-    assert_eq!(env.titles(&["decision"]).await.len(), 2);
-}
-
-#[tokio::test]
-async fn lone_room_is_held_open_until_another_comes_on() {
-    let env = Env::new();
-    {
-        let mut zones = env.fake.zones.lock().unwrap();
-        zones[0].on = true;
-        zones[1].on = false;
-        zones[2].on = false;
-    }
-    // Dry run only says so, once.
-    env.tick().await;
-    env.advance(60.0);
-    env.tick().await;
-    assert!(!env.fake.sent().iter().any(|s| matches!(s, Sent::Zone(..))));
-    let would = env.titles(&["decision"]).await;
-    assert_eq!(
-        would
-            .iter()
-            .filter(|t| *t == "Would: Master Bed fully open")
-            .count(),
-        1
-    );
-
-    env.go_live().await;
-    env.tick().await;
-    assert!(
-        env.fake
-            .sent()
-            .contains(&Sent::Zone(0, None, Some(ZoneValue::Open(100))))
-    );
-    let state = env.tick().await;
-    let bed = zone_json(&state, "Master Bed");
-    assert_eq!(bed["held_open"], true);
-    assert_eq!(bed["control"], "percentage");
-    assert_eq!(bed["target"], 24.0);
-    assert!(env.titles(&["external"]).await.is_empty(), "our own change");
-
-    // Its target is kept here while it's open, and goes back with it.
-    env.call(
-        Method::PATCH,
-        "/api/zones/0",
-        Some(json!({ "target": 23.0 })),
-    )
-    .await;
-    env.advance(60.0);
-    assert_eq!(zone_json(&env.tick().await, "Master Bed")["target"], 23.0);
-
-    env.call(Method::PATCH, "/api/zones/3", Some(json!({ "on": true })))
-        .await;
-    env.advance(60.0);
-    env.tick().await;
-    assert!(
-        env.fake
-            .sent()
-            .contains(&Sent::Zone(0, None, Some(ZoneValue::Setpoint(23.0))))
-    );
-    let state = env.tick().await;
-    let bed = zone_json(&state, "Master Bed");
-    assert_eq!(bed["held_open"], false);
-    assert_eq!(bed["control"], "temperature");
-    assert_eq!(env.get("/api/settings").await["targets"], json!({}));
-    assert_eq!(
-        env.titles(&["decision"]).await[0],
-        "Master Bed back to temperature control at 23.0°"
-    );
+    assert_eq!(would().await.len(), 2);
 }
 
 #[tokio::test]
@@ -652,39 +598,51 @@ async fn state_reports_the_build() {
 }
 
 #[tokio::test]
-async fn hand_back_is_repeated_until_it_takes() {
+async fn controller_runs_the_dampers() {
     let env = Env::new();
-    {
-        let mut zones = env.fake.zones.lock().unwrap();
-        zones[0].on = true;
-        zones[1].on = false;
-        zones[2].on = false;
-    }
     env.go_live().await;
     env.tick().await;
-    env.fake.stubborn.store(true, Ordering::SeqCst);
-    env.call(Method::PATCH, "/api/zones/3", Some(json!({ "on": true })))
-        .await;
-    let back = Sent::Zone(0, None, Some(ZoneValue::Setpoint(24.0)));
-    for _ in 0..2 {
-        env.advance(60.0);
-        let state = env.tick().await;
-        assert_eq!(zone_json(&state, "Master Bed")["held_open"], false);
-    }
-    assert_eq!(env.fake.sent().iter().filter(|s| **s == back).count(), 2);
-    let titles = env.titles(&["decision"]).await;
-    let logged = titles
-        .iter()
-        .filter(|t| t.starts_with("Master Bed back to temperature control"))
-        .count();
-    assert_eq!(logged, 1, "{titles:?}");
-
-    env.fake.stubborn.store(false, Ordering::SeqCst);
+    // Master Bed (off) switches to percentage control, Study needs it most, and Bedroom 3
+    // is 0.7° over.
+    let opened: Vec<_> = env
+        .fake
+        .sent()
+        .into_iter()
+        .filter(|s| matches!(s, Sent::Zone(..)))
+        .collect();
+    assert_eq!(
+        opened,
+        vec![
+            Sent::Zone(0, None, Some(ZoneValue::Open(100))),
+            Sent::Zone(2, None, Some(ZoneValue::Open(75))),
+            Sent::Zone(3, None, Some(ZoneValue::Open(100))),
+        ]
+    );
+    assert_eq!(
+        env.titles(&["decision"]).await[0],
+        "Master Bed to percentage control at 100% · Bedroom 3 50% → 75% · Study 50% → 100%"
+    );
+    assert_eq!(env.get("/api/settings").await["targets"]["0"], 24.0);
     env.advance(60.0);
     env.tick().await;
+    assert!(env.titles(&["external"]).await.is_empty(), "our own switch");
+
+    // Bedroom 3 reaches target and closes down; nothing else moves.
+    let before = env.fake.sent().len();
+    env.fake.zones.lock().unwrap()[1].temperature = Some(23.9);
     env.advance(60.0);
-    let state = env.tick().await;
-    assert_eq!(zone_json(&state, "Master Bed")["control"], "temperature");
-    assert_eq!(env.fake.sent().iter().filter(|s| **s == back).count(), 3);
-    assert_eq!(env.get("/api/settings").await["targets"], json!({}));
+    env.tick().await;
+    assert_eq!(
+        env.fake.sent()[before..],
+        [Sent::Zone(2, None, Some(ZoneValue::Open(10)))]
+    );
+
+    // Paused: hands off the dampers too.
+    env.call(Method::POST, "/api/pause", Some(json!({ "minutes": 15 })))
+        .await;
+    env.fake.zones.lock().unwrap()[1].temperature = Some(25.5);
+    let before = env.fake.sent().len();
+    env.advance(60.0);
+    env.tick().await;
+    assert_eq!(env.fake.sent().len(), before);
 }

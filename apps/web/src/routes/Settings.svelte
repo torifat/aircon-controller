@@ -58,7 +58,7 @@
       <div class={line}>
         {@render row(
           'Controller enabled',
-          s.enabled ? 'Climate is adjusting fan and AC setpoint' : 'Off — AirTouch runs on its own',
+          s.enabled ? 'Climate is adjusting fan, AC setpoint and dampers' : 'Off — rooms keep their last opening',
         )}
         <Switch checked={s.enabled} label="Controller enabled" onchange={(v) => save({ enabled: v })} />
       </div>
@@ -100,6 +100,23 @@
           <span>0° Low</span><span>{deg(s.fan_medium_at)} Medium</span><span>{deg(s.fan_high_at)} High</span><span>3°+</span>
         </div>
       </div>
+    </div>
+
+    <h2 class="m-0 px-1 pt-4 text-[13px] font-semibold text-mu">Dampers</h2>
+    <div class={card}>
+      <div class={line}>
+        {@render row('Fully open from', 'A room this far from target gets all the air it can')}
+        <Stepper value={s.damper_full_at} step={0.5} min={0.5} max={3} label="fully open from"
+          format={(v) => deg(v)} onchange={(v) => save({ damper_full_at: v })} />
+      </div>
+      <div class={[line, 'border-t border-line']}>
+        {@render row('At target', 'Opening for a room that has reached target')}
+        <Stepper value={s.damper_min} step={5} min={0} max={50} label="opening at target"
+          format={(v) => `${v}%`} onchange={(v) => save({ damper_min: v })} />
+      </div>
+      <p class="m-0 border-t border-line px-4 py-3 text-[13px] leading-snug text-mu">
+        The room furthest from target is always fully open, so nothing spills.
+      </p>
     </div>
 
     <h2 class="m-0 px-1 pt-4 text-[13px] font-semibold text-mu">Timing</h2>
