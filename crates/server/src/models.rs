@@ -170,13 +170,14 @@ pub struct Settings {
     /// Gap between the worst zone and its target for each fan step.
     pub fan_medium_at: f64,
     pub fan_high_at: f64,
-    /// Extra margin before stepping the fan back down, so it doesn't flap.
+    /// Extra margin before stepping the fan back down, so it doesn't flap. Not applied
+    /// within `ease_within`, where the fan always runs Low.
     pub fan_hysteresis: f64,
     /// AC setpoint = AC temperature -/+ gain * worst gap, capped at max offset.
     pub setpoint_gain: f64,
     pub max_setpoint_offset: f64,
     /// Below this gap the AC setpoint sits at the AC's own reading, so the compressor
-    /// idles and the air comes out milder. 0 turns it off.
+    /// idles and the air comes out milder, and the fan runs Low. 0 turns it off.
     pub ease_within: f64,
     pub setpoint_step: f64,
     /// Damper opening, in percent, for a room at or past target. The room furthest from

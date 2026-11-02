@@ -18,7 +18,8 @@ deadband: number,
  */
 fan_medium_at: number, fan_high_at: number, 
 /**
- * Extra margin before stepping the fan back down, so it doesn't flap.
+ * Extra margin before stepping the fan back down, so it doesn't flap. Not applied
+ * within `ease_within`, where the fan always runs Low.
  */
 fan_hysteresis: number, 
 /**
@@ -27,7 +28,7 @@ fan_hysteresis: number,
 setpoint_gain: number, max_setpoint_offset: number, 
 /**
  * Below this gap the AC setpoint sits at the AC's own reading, so the compressor
- * idles and the air comes out milder. 0 turns it off.
+ * idles and the air comes out milder, and the fan runs Low. 0 turns it off.
  */
 ease_within: number, setpoint_step: number, 
 /**

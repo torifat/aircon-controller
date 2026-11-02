@@ -99,6 +99,10 @@
         <div class="flex justify-between pt-1.5 text-[11px] text-mu">
           <span>0° Low</span><span>{deg(s.fan_medium_at)} Medium</span><span>{deg(s.fan_high_at)} High</span><span>3°+</span>
         </div>
+        <p class="m-0 pt-2 text-[11px] text-mu">
+          Steps back down to Medium under {deg(s.fan_high_at - s.fan_hysteresis)} and to Low under
+          {deg(Math.max(s.ease_within, s.fan_medium_at - s.fan_hysteresis))}; always Low within the ease-off band
+        </p>
       </div>
     </div>
 

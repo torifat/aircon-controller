@@ -54,7 +54,13 @@ pub fn evaluate_zones(snap: &Snapshot, s: &Settings) -> Vec<ZoneEval> {
 }
 
 /// Fan level for the worst zone's gap, stepping down only past a hysteresis margin.
+///
+/// Within `ease_within` it is always Low: the compressor idles there, and a room that
+/// close would otherwise get a strong draft through its wide-open damper.
 pub fn fan_for(gap: f64, current: Fan, s: &Settings, available: &[Fan]) -> Fan {
+    if gap < s.ease_within {
+        return Fan::Low;
+    }
     let thresholds = [0.0, s.fan_medium_at, s.fan_high_at];
     let mut level = thresholds.iter().rposition(|&t| gap >= t).unwrap_or(0);
     // Going down: hold the current level until we're clearly below its threshold.
@@ -554,7 +560,7 @@ mod tests {
             (2.9, Fan::Auto, Fan::High),
             (1.9, Fan::High, Fan::High),
             (1.7, Fan::High, Fan::Medium),
-            (0.9, Fan::Medium, Fan::Medium),
+            (0.9, Fan::Medium, Fan::Low),
             (0.5, Fan::Medium, Fan::Low),
         ];
         for (gap, current, want) in cases {
@@ -568,6 +574,12 @@ mod tests {
             fan_for(2.5, Fan::Low, &s, &[Fan::Low, Fan::Medium]),
             Fan::Medium
         );
+        // Without an ease-off band the hysteresis holds Medium just under its threshold.
+        let s = Settings {
+            ease_within: 0.0,
+            ..Settings::default()
+        };
+        assert_eq!(fan_for(0.9, Fan::Medium, &s, &FAN_LEVELS), Fan::Medium);
     }
 
     #[test]
