@@ -382,7 +382,8 @@ pub enum Damper {
         target: f64,
         reason: String,
     },
-    /// The room we opened was switched back (in the app) or is gone; stop tracking it.
+    /// The room we opened is back in temperature control (as asked, or from the app) or is
+    /// gone; stop tracking it.
     Release,
 }
 
@@ -423,6 +424,13 @@ pub fn damper(snap: &Snapshot, s: &Settings, rt: &Runtime, now: f64) -> Option<D
             format!("{} no longer counts", z.name)
         } else if !live {
             "Controller paused".to_owned()
+        } else if rt.handing_back {
+            // Alone again before the hand back took: keep it open after all.
+            return Some(Damper::Open {
+                zone: n,
+                name: z.name.clone(),
+                target: s.targets.get(&n).copied().or(z.setpoint)?,
+            });
         } else {
             return None;
         };
@@ -1042,5 +1050,18 @@ mod tests {
         assert_eq!(damper(&s, &live(), &opened(1), NOW), Some(Damper::Release));
         let s = snap(cool(), vec![zone(2, 24.3)]);
         assert_eq!(damper(&s, &live(), &opened(1), NOW), Some(Damper::Release));
+    }
+
+    #[test]
+    fn alone_again_while_handing_back_reopens() {
+        let s = snap(cool(), vec![named("Mouni", held_open(zone(1, 24.3)))]);
+        let rt = Runtime {
+            handing_back: true,
+            ..opened(1)
+        };
+        assert!(matches!(
+            damper(&s, &live(), &rt, NOW),
+            Some(Damper::Open { zone: 1, .. })
+        ));
     }
 }

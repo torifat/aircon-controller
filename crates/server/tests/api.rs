@@ -33,6 +33,8 @@ struct Fake {
     zones: Mutex<Vec<ZoneReading>>,
     sent: Mutex<Vec<Sent>>,
     ready: Notify,
+    /// Zone commands are recorded but not applied, like one the console lost.
+    stubborn: AtomicBool,
 }
 
 fn zone(number: u8, name: &str, temp: f64, on: bool, control: ZoneControl) -> ZoneReading {
@@ -74,6 +76,7 @@ impl Fake {
             ]),
             sent: Mutex::new(Vec::new()),
             ready: Notify::new(),
+            stubborn: AtomicBool::new(false),
         })
     }
 
@@ -135,16 +138,18 @@ impl Device for Fake {
             .filter(|z| z.number == number)
         {
             z.on = on.unwrap_or(z.on);
-            match value {
-                Some(ZoneValue::Setpoint(c)) => {
-                    z.control = ZoneControl::Temperature;
-                    z.setpoint = Some(c);
+            if !self.stubborn.load(Ordering::SeqCst) {
+                match value {
+                    Some(ZoneValue::Setpoint(c)) => {
+                        z.control = ZoneControl::Temperature;
+                        z.setpoint = Some(c);
+                    }
+                    Some(ZoneValue::Open(p)) => {
+                        z.control = ZoneControl::Percentage;
+                        z.damper = f64::from(p) / 100.0;
+                    }
+                    None => {}
                 }
-                Some(ZoneValue::Open(p)) => {
-                    z.control = ZoneControl::Percentage;
-                    z.damper = f64::from(p) / 100.0;
-                }
-                None => {}
             }
         }
         Ok(())
@@ -644,4 +649,42 @@ async fn state_reports_the_build() {
     let env = Env::new();
     let state = env.get("/api/state").await;
     assert_eq!(state["build"]["version"], "dev");
+}
+
+#[tokio::test]
+async fn hand_back_is_repeated_until_it_takes() {
+    let env = Env::new();
+    {
+        let mut zones = env.fake.zones.lock().unwrap();
+        zones[0].on = true;
+        zones[1].on = false;
+        zones[2].on = false;
+    }
+    env.go_live().await;
+    env.tick().await;
+    env.fake.stubborn.store(true, Ordering::SeqCst);
+    env.call(Method::PATCH, "/api/zones/3", Some(json!({ "on": true })))
+        .await;
+    let back = Sent::Zone(0, None, Some(ZoneValue::Setpoint(24.0)));
+    for _ in 0..2 {
+        env.advance(60.0);
+        let state = env.tick().await;
+        assert_eq!(zone_json(&state, "Master Bed")["held_open"], false);
+    }
+    assert_eq!(env.fake.sent().iter().filter(|s| **s == back).count(), 2);
+    let titles = env.titles(&["decision"]).await;
+    let logged = titles
+        .iter()
+        .filter(|t| t.starts_with("Master Bed back to temperature control"))
+        .count();
+    assert_eq!(logged, 1, "{titles:?}");
+
+    env.fake.stubborn.store(false, Ordering::SeqCst);
+    env.advance(60.0);
+    env.tick().await;
+    env.advance(60.0);
+    let state = env.tick().await;
+    assert_eq!(zone_json(&state, "Master Bed")["control"], "temperature");
+    assert_eq!(env.fake.sent().iter().filter(|s| **s == back).count(), 3);
+    assert_eq!(env.get("/api/settings").await["targets"], json!({}));
 }

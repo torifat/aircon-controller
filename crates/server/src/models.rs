@@ -264,6 +264,9 @@ pub struct Runtime {
     /// The lone room we switched to percentage control and opened fully. Its target is in
     /// `Settings::targets` until it's handed back.
     pub opened: Option<u8>,
+    /// We've asked for `opened` to go back to temperature control; it's kept until the
+    /// console reports that it has, and asked again each check until then.
+    pub handing_back: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]

@@ -18,8 +18,8 @@ use crate::models::{
 };
 use crate::now;
 use crate::protocol::{
-    self, AcAbility, AcControl, AcMode, AcStatus, Decoder, FanSpeed, Message, Request, ZonePower,
-    ZoneStatus, ZoneValue,
+    self, AcAbility, AcControl, AcMode, AcPower, AcStatus, Decoder, FanSpeed, Message, Request,
+    ZonePower, ZoneStatus, ZoneValue,
 };
 
 const PORT: u16 = 9005;
@@ -337,7 +337,17 @@ impl Device for AirTouch {
             fan,
             setpoint: cmd.setpoint,
         };
-        self.send(Request::AcControl(vec![control])).await
+        self.send(Request::AcControl(vec![control])).await?;
+        // As for zones: a check right after must not mistake the console's lag for
+        // someone else changing the AC back.
+        if let Some(ac) = self.lock().ac.as_mut() {
+            if let Some(on) = cmd.power {
+                ac.power = if on { AcPower::On } else { AcPower::Off };
+            }
+            ac.fan = fan.unwrap_or(ac.fan);
+            ac.setpoint = cmd.setpoint.or(ac.setpoint);
+        }
+        self.send(Request::AcStatus).await
     }
 
     async fn send_zone(
@@ -361,16 +371,10 @@ impl Device for AirTouch {
                 if let Some(on) = on {
                     z.power = if on { ZonePower::On } else { ZonePower::Off };
                 }
-                match value {
-                    Some(ZoneValue::Setpoint(c)) => {
-                        z.percentage_control = false;
-                        z.setpoint = Some(c);
-                    }
-                    Some(ZoneValue::Open(p)) => {
-                        z.percentage_control = true;
-                        z.open = p.min(100);
-                    }
-                    None => {}
+                // A switch between temperature and percentage control is left for the
+                // console to report: the controller waits on it to know the switch took.
+                if let Some(ZoneValue::Setpoint(c)) = value {
+                    z.setpoint = Some(c);
                 }
             }
         }

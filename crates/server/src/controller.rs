@@ -216,7 +216,12 @@ impl<D: Device> Controller<D> {
         let Some(change) = change else { return };
         let (zone, value, title, reason) = match &change {
             Damper::Release => {
-                runtime.opened = None;
+                if let Some(zone) = runtime.opened.take()
+                    && st.settings.targets.remove(&zone).is_some()
+                {
+                    self.store.save_settings(&st.settings);
+                }
+                runtime.handing_back = false;
                 return;
             }
             Damper::Open { zone, name, target } => (
@@ -249,21 +254,23 @@ impl<D: Device> Controller<D> {
             );
             return;
         }
+        // `opened` is kept through a hand back: the room's target stays here, and the
+        // request is repeated until the console reports temperature control (`Release`).
+        // Sent right after the opening, one was lost before it took.
+        let retry = runtime.handing_back;
         match change {
             Damper::Open { zone, target, .. } => {
                 st.settings.targets.insert(zone, target);
+                self.store.save_settings(&st.settings);
                 runtime.opened = Some(zone);
+                runtime.handing_back = false;
             }
-            _ => {
-                st.settings.targets.remove(&zone);
-                runtime.opened = None;
-            }
+            _ => runtime.handing_back = true,
         }
-        self.store.save_settings(&st.settings);
-        self.store
-            .log(now, ActivityKind::Decision, &title, &reason, false);
-        // Check again with the zone as it is now.
-        self.poke();
+        if !retry {
+            self.store
+                .log(now, ActivityKind::Decision, &title, &reason, false);
+        }
     }
 
     fn note_status(&self, st: &mut State, decision: &Decision, now: f64) {
