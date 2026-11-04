@@ -4,10 +4,11 @@
 //! tilt, so the surplus lands in the spill zone. Instead we throttle the AC itself, driven
 //! by whichever active zone is furthest from its target:
 //!
-//! - fan steps Low / Medium / High with the size of that gap;
+//! - fan steps Low / Medium / High with the size of that gap, but a room only pushes it
+//!   as far as its `max_fan`, so a small room doesn't get a full blast;
 //! - the AC setpoint is pulled away from the AC's own reading by the gap, so the inverter
 //!   compressor works hard when rooms are far off, and sits at that reading within
-//!   `ease_within` of target so it idles;
+//!   `ease_within` of target so it idles; a room with a lower `max_fan` pulls it less;
 //! - when every active zone reaches target the AC is turned off ("parked"), and turned back
 //!   on once any zone drifts `deadband` degrees past its target;
 //! - min on/off times protect the compressor;
@@ -77,12 +78,38 @@ pub fn fan_for(gap: f64, current: Fan, s: &Settings, available: &[Fan]) -> Fan {
     FAN_LEVELS[level]
 }
 
-/// AC setpoint that makes the inverter work in proportion to the worst gap.
+/// Fan level for the rooms that count: each asks `fan_for` its own gap, capped at its
+/// `max_fan`, and the neediest ask wins. Study 2° off with a Medium cap gets Medium; a
+/// bigger room 2° off at the same time still gets High.
+pub fn fan_for_rooms(zones: &[ZoneEval], current: Fan, s: &Settings, available: &[Fan]) -> Fan {
+    zones
+        .iter()
+        .filter(|z| z.active)
+        .map(|z| {
+            let fan = fan_for(z.error.unwrap_or(0.0), current, s, available);
+            s.max_fan.get(&z.number).map_or(fan, |&cap| fan.min(cap))
+        })
+        .max()
+        .unwrap_or(Fan::Low)
+}
+
+/// How much of its gap a room may pull the AC setpoint by: a third per fan level its
+/// `max_fan` allows, so a Medium-capped room pulls two thirds of it.
+fn pull_share(zone: u8, s: &Settings) -> f64 {
+    s.max_fan
+        .get(&zone)
+        .and_then(|f| f.level())
+        .map_or(1.0, |l| (l + 1) as f64 / FAN_LEVELS.len() as f64)
+}
+
+/// AC setpoint that makes the inverter work in proportion to the rooms' gaps, each scaled
+/// by its `pull_share` so a small room isn't sent air that much colder (or hotter); the
+/// biggest pull wins.
 ///
 /// Within `ease_within` of target it sits at the AC's own reading instead, rounded away
 /// from work, so the compressor idles: on a Low fan a working compressor sends out a
 /// trickle of very cold (or hot) air.
-pub fn setpoint_for(ac: &AcReading, worst: &ZoneEval, s: &Settings) -> f64 {
+pub fn setpoint_for(ac: &AcReading, zones: &[ZoneEval], worst: &ZoneEval, s: &Settings) -> f64 {
     let reference = ac.temperature.or(worst.target).unwrap_or(24.0);
     let gap = worst.error.unwrap_or(0.0).max(0.0);
     let steps = if gap < s.ease_within {
@@ -93,16 +120,27 @@ pub fn setpoint_for(ac: &AcReading, worst: &ZoneEval, s: &Settings) -> f64 {
             steps.ceil()
         }
     } else {
-        let offset = (s.setpoint_gain * gap).min(s.max_setpoint_offset);
+        let pull = zones
+            .iter()
+            .filter(|z| z.active)
+            .filter_map(|z| z.error.map(|e| e * pull_share(z.number, s)))
+            .fold(0.0, f64::max);
+        let offset = (s.setpoint_gain * pull).min(s.max_setpoint_offset);
         ((reference - ac.direction.sign() * offset) / s.setpoint_step).round()
     };
     ac.limits.clamp(steps * s.setpoint_step, ac.direction)
 }
 
 /// Fan + setpoint command with only the fields that change (all of them when `force`).
-pub fn regulate(ac: &AcReading, worst: &ZoneEval, s: &Settings, force: bool) -> Command {
-    let fan = fan_for(worst.error.unwrap_or(0.0), ac.fan, s, &ac.fans);
-    let setpoint = setpoint_for(ac, worst, s);
+pub fn regulate(
+    ac: &AcReading,
+    zones: &[ZoneEval],
+    worst: &ZoneEval,
+    s: &Settings,
+    force: bool,
+) -> Command {
+    let fan = fan_for_rooms(zones, ac.fan, s, &ac.fans);
+    let setpoint = setpoint_for(ac, zones, worst, s);
     let same_setpoint = ac
         .setpoint
         .is_some_and(|cur| (setpoint - cur).abs() < s.setpoint_step / 2.0);
@@ -338,7 +376,7 @@ pub fn decide(snap: &Snapshot, s: &Settings, rt: &Runtime, now: f64) -> (Decisio
         if gap <= 0.0 {
             let held = hold(&step.rt, s.min_on_minutes, now);
             if held > 0.0 {
-                let cmd = regulate(ac, &worst, s, false);
+                let cmd = regulate(ac, &step.zones, &worst, s, false);
                 return step.done(
                     Status::Running,
                     "All rooms at target; keeping the AC on for its minimum run time",
@@ -360,7 +398,7 @@ pub fn decide(snap: &Snapshot, s: &Settings, rt: &Runtime, now: f64) -> (Decisio
                 true,
             );
         }
-        let cmd = regulate(ac, &worst, s, false);
+        let cmd = regulate(ac, &step.zones, &worst, s, false);
         return step.done(Status::Running, text, Some(cmd), Some(worst), 0.0, true);
     }
 
@@ -379,7 +417,7 @@ pub fn decide(snap: &Snapshot, s: &Settings, rt: &Runtime, now: f64) -> (Decisio
     }
     let cmd = Command {
         power: Some(true),
-        ..regulate(ac, &worst, s, true)
+        ..regulate(ac, &step.zones, &worst, s, true)
     };
     step.done(
         Status::Running,
@@ -606,6 +644,48 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(fan_for(0.9, Fan::Medium, &s, &FAN_LEVELS), Fan::Medium);
+    }
+
+    #[test]
+    fn small_rooms_cap_their_own_fan() {
+        // Study 2.1° off alone: its Medium cap keeps it off High.
+        let settings = Settings {
+            max_fan: [(3, Fan::Medium), (2, Fan::Medium)].into(),
+            ..live()
+        };
+        let s = snap(cool(), vec![zone(1, 24.5), named("Study", zone(3, 26.1))]);
+        let (d, _) = run(&s, &settings, &Runtime::default());
+        assert_eq!(d.worst.unwrap().name, "Study");
+        assert_eq!(d.command.unwrap().fan, Some(Fan::Medium));
+        // A bigger room that needs High still gets it, even when it isn't the worst.
+        let s = snap(cool(), vec![zone(1, 26.0), named("Study", zone(3, 26.5))]);
+        let (d, _) = run(&s, &settings, &Runtime::default());
+        assert_eq!(d.worst.unwrap().name, "Study");
+        assert_eq!(d.command.unwrap().fan, Some(Fan::High));
+        // The setpoint follows the bigger room's full 2° pull, not Study's capped 1.7°.
+        assert_eq!(d.command.unwrap().setpoint, Some(22.0));
+    }
+
+    #[test]
+    fn small_rooms_pull_the_setpoint_less() {
+        // Study 2.1° off with a Medium cap pulls 1.4°: 23°, not 22°.
+        let settings = Settings {
+            max_fan: [(3, Fan::Medium)].into(),
+            ..live()
+        };
+        assert_eq!(
+            setpoint_for(&cool(), &[eval(2.1)], &eval(2.1), &settings),
+            23.0
+        );
+        assert_eq!(
+            setpoint_for(&cool(), &[eval(2.1)], &eval(2.1), &live()),
+            22.0
+        );
+        // Still idles within the ease-off band.
+        assert_eq!(
+            setpoint_for(&cool(), &[eval(0.6)], &eval(0.6), &settings),
+            24.0
+        );
     }
 
     #[test]
@@ -1095,15 +1175,15 @@ mod tests {
             temperature: Some(23.6),
             ..cool()
         };
-        assert_eq!(setpoint_for(&ac, &eval(0.6), &live()), 24.0);
+        assert_eq!(setpoint_for(&ac, &[eval(0.6)], &eval(0.6), &live()), 24.0);
         // Past `ease_within` it works again, by the whole gap.
-        assert_eq!(setpoint_for(&ac, &eval(1.4), &live()), 22.0);
+        assert_eq!(setpoint_for(&ac, &[eval(1.4)], &eval(1.4), &live()), 22.0);
         // 0 turns easing off.
         let off = Settings {
             ease_within: 0.0,
             ..live()
         };
-        assert_eq!(setpoint_for(&ac, &eval(0.6), &off), 23.0);
+        assert_eq!(setpoint_for(&ac, &[eval(0.6)], &eval(0.6), &off), 23.0);
     }
 
     #[test]
@@ -1112,6 +1192,6 @@ mod tests {
             temperature: Some(21.4),
             ..ac("heat")
         };
-        assert_eq!(setpoint_for(&ac, &eval(0.6), &live()), 21.0);
+        assert_eq!(setpoint_for(&ac, &[eval(0.6)], &eval(0.6), &live()), 21.0);
     }
 }

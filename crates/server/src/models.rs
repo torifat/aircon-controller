@@ -196,6 +196,10 @@ pub struct Settings {
     /// runs the dampers: the AirTouch ignores setpoints there. Zones still in temperature
     /// control use their AirTouch setpoint.
     pub targets: BTreeMap<u8, f64>,
+    /// Fastest fan a room's own gap may ask for, by zone. A small room at 100% on High
+    /// gets a cold draft, so it tops out lower; the fan still goes higher for a bigger
+    /// room that needs it. Rooms not listed can ask for High.
+    pub max_fan: BTreeMap<u8, Fan>,
 }
 
 impl Default for Settings {
@@ -219,6 +223,7 @@ impl Default for Settings {
             tick_seconds: 60.0,
             zones: None,
             targets: BTreeMap::new(),
+            max_fan: BTreeMap::new(),
         }
     }
 }

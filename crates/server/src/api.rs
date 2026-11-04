@@ -436,6 +436,8 @@ pub struct SettingsPatch {
     #[ts(as = "Option<Option<Vec<u8>>>")]
     pub zones: Nullable<Vec<u8>>,
     pub targets: Option<BTreeMap<u8, f64>>,
+    /// Replaces the whole map; a room left out can ask for High again.
+    pub max_fan: Option<BTreeMap<u8, Fan>>,
 }
 
 /// A patch field that tells an explicit `null` apart from a missing field.
@@ -488,6 +490,13 @@ impl SettingsPatch {
                 in_range("target", Some(t), 10.0, 32.0)?;
             }
         }
+        if let Some(caps) = &self.max_fan
+            && caps.values().any(|f| f.level().is_none())
+        {
+            return Err(ApiError::Invalid(
+                "max_fan must be low, medium or high".into(),
+            ));
+        }
         let mut out = s.clone();
         macro_rules! take {
             ($($f:ident),*) => { $( if let Some(v) = self.$f { out.$f = v; } )* };
@@ -509,7 +518,8 @@ impl SettingsPatch {
             min_off_minutes,
             manual_pause_minutes,
             tick_seconds,
-            targets
+            targets,
+            max_fan
         );
         match self.zones {
             Nullable::Absent => {}

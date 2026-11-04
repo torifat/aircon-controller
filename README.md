@@ -5,7 +5,10 @@ zone freezing. Rooms run in percentage control and this controller drives both t
 and the AC from the zone sensors; everyone uses the Climate UI rather than the AirTouch app:
 
 - **Fan** steps Low / Medium / High with the gap between the worst active room and its
-  target (1° and 2° by default, with a 0.2° margin before stepping down).
+  target (1° and 2° by default, with a 0.2° margin before stepping down). Each room can cap
+  how far its own gap pushes the fan (**fan limit per room**): Study 2° off with a Medium cap
+  gets Medium, but a bigger room that needs High still gets it. The cap also scales how far
+  that room pulls the AC setpoint: two thirds of its gap on Medium, a third on Low.
 - **AC setpoint** is pulled below (cooling) or above (heating) the AC's own reading by that
   gap, so the inverter works hard when rooms are far off. Within 1° of target (**ease off
   within**) it sits at the AC's reading instead, so the compressor idles and a Low fan doesn't

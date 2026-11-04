@@ -391,6 +391,7 @@ async fn settings_validation() {
         json!({ "deadband": 10 }),
         json!({ "fan_medium_at": 3 }),
         json!({ "bogus": 1 }),
+        json!({ "max_fan": { "3": "auto" } }),
     ] {
         let (status, _) = env
             .call(Method::PATCH, "/api/settings", Some(bad.clone()))
@@ -405,6 +406,14 @@ async fn settings_validation() {
         )
         .await;
     assert_eq!(body["zones"], json!([2, 3]));
+    let (_, body) = env
+        .call(
+            Method::PATCH,
+            "/api/settings",
+            Some(json!({ "max_fan": { "3": "medium" } })),
+        )
+        .await;
+    assert_eq!(body["max_fan"], json!({ "3": "medium" }));
     let (_, body) = env
         .call(
             Method::PATCH,
