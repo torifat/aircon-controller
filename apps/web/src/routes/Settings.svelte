@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Settings, SettingsPatch } from '@aircon/api';
+  import type { Fan, Settings, SettingsPatch } from '@aircon/api';
 
   import { api } from '../lib/api';
   import Stepper from '../lib/components/Stepper.svelte';
@@ -20,6 +20,16 @@
     if (on) set.add(n);
     else set.delete(n);
     void save({ zones: [...set].sort((a, b) => a - b) });
+  }
+
+  const fanLevels = ['low', 'medium', 'high'] as const;
+
+  function setCap(current: Settings, n: number, fan: Fan) {
+    const caps = { ...current.max_fan };
+    // High is no limit: leave the room out.
+    if (fan === 'high') delete caps[n];
+    else caps[n] = fan;
+    void save({ max_fan: caps });
   }
 
   let testing = $state(false);
@@ -121,6 +131,27 @@
       <p class="m-0 border-t border-line px-4 py-3 text-[13px] leading-snug text-mu">
         The room furthest from target opens at least enough that the rooms on add up to 100%, so nothing
         spills.
+      </p>
+    </div>
+
+    <h2 class="m-0 px-1 pt-4 text-[13px] font-semibold text-mu">Fan limit per room</h2>
+    <div class={card}>
+      {#each zones as z, i (z.number)}
+        {@const cap = s.max_fan[z.number] ?? 'high'}
+        <div class={[line, i && 'border-t border-line']}>
+          <span class="min-w-0 flex-1 text-[15px] font-semibold">{z.name}</span>
+          <div role="radiogroup" aria-label="{z.name} fan limit" class="flex rounded-xl bg-s2 p-0.5">
+            {#each fanLevels as f (f)}
+              <button type="button" role="radio" aria-checked={cap === f} onclick={() => setCap(s, z.number, f)}
+                class={['min-h-9 rounded-[10px] px-3 text-[13px] font-semibold capitalize',
+                  cap === f ? 'bg-s1 text-tx shadow-sm' : 'text-mu']}>{f}</button>
+            {/each}
+          </div>
+        </div>
+      {/each}
+      <p class="m-0 border-t border-line px-4 py-3 text-[13px] leading-snug text-mu">
+        The fastest a room can push the fan, however far it is from target; on Medium it also pulls the AC setpoint by two thirds of its gap, on Low by a third. Small rooms get a cold draft on
+        High; the fan still goes higher when a bigger room needs it.
       </p>
     </div>
 
